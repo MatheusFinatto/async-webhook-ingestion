@@ -1,0 +1,83 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-webhook}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-webhook}
+      POSTGRES_DB: ${POSTGRES_DB:-webhook_ingestion}
+    ports:
+      - '${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-webhook} -d ${POSTGRES_DB:-webhook_ingestion}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+    ports:
+      - '${RABBITMQ_PORT:-5672}:5672'
+      - '15672:15672'
+    healthcheck:
+      test: ['CMD', 'rabbitmq-diagnostics', '-q', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    image: async-webhook-ingestion:local
+    environment:
+      APP_ROLE: api
+      # Fixed internal port so the healthcheck and container-port mapping stay in sync
+      # regardless of PORT in .env (which only shifts the host side of the mapping below).
+      PORT: 3000
+      POSTGRES_HOST: postgres
+      RABBITMQ_HOST: rabbitmq
+    # .env is optional: it does not exist on a clean clone / in CI, and the infra vars
+    # already carry defaults via interpolation. Real runs supply secrets through it.
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - '${PORT:-3000}:3000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('http').get('http://localhost:3000/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    # Same build + image tag as api, so compose builds the image once and both services
+    # reuse it; the role is chosen at runtime via APP_ROLE (D-008).
+    build: .
+    image: async-webhook-ingestion:local
+    environment:
+      APP_ROLE: worker
+      POSTGRES_HOST: postgres
+      RABBITMQ_HOST: rabbitmq
+    env_file:
+      - path: .env
+        required: false
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+volumes:
+  pgdata:
