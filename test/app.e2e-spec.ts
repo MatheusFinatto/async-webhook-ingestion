@@ -8,6 +8,7 @@ import {
   StartedPostgreSqlContainer,
 } from '@testcontainers/postgresql';
 import { GenericContainer, StartedTestContainer, Wait } from 'testcontainers';
+import { AmqpConnection } from '@golevelup/nestjs-rabbitmq';
 import { createHmac } from 'node:crypto';
 import request from 'supertest';
 import { App } from 'supertest/types';
@@ -16,6 +17,15 @@ import { AppModule } from '../src/app.module';
 import { DlqMessage } from '../src/events/entities/dlq-message.entity';
 import { Event } from '../src/events/entities/event.entity';
 import { EventStatus } from '../src/events/event-status.enum';
+import {
+  DEAD_LETTER_EXCHANGE,
+  DEAD_LETTER_QUEUE,
+  ORDER_RECEIVED_ROUTING_KEY,
+  RETRY_EXCHANGE,
+  RETRY_TIERS,
+  WEBHOOK_EXCHANGE,
+  WORK_QUEUE,
+} from '../src/messaging/messaging.constants';
 
 jest.setTimeout(180_000);
 
@@ -191,5 +201,63 @@ describe('App (e2e)', () => {
       .set('x-signature', sign(ts, body))
       .send(body)
       .expect(413);
+  });
+
+  it('declares the durable topology and routes events to the work queue', async () => {
+    const channel = app.get(AmqpConnection).channel;
+
+    await expect(
+      channel.checkExchange(WEBHOOK_EXCHANGE),
+    ).resolves.toBeDefined();
+    await expect(channel.checkExchange(RETRY_EXCHANGE)).resolves.toBeDefined();
+    await expect(
+      channel.checkExchange(DEAD_LETTER_EXCHANGE),
+    ).resolves.toBeDefined();
+
+    for (const tier of RETRY_TIERS) {
+      await expect(channel.checkQueue(tier.queue)).resolves.toBeDefined();
+    }
+    await expect(channel.checkQueue(DEAD_LETTER_QUEUE)).resolves.toBeDefined();
+
+    const work = await channel.checkQueue(WORK_QUEUE);
+    expect(work.messageCount).toBeGreaterThan(0);
+
+    const message = await channel.get(WORK_QUEUE, { noAck: true });
+    expect(message).not.toBe(false);
+    if (message) {
+      expect(message.properties.deliveryMode).toBe(2);
+      expect(message.properties.correlationId).toBe('corr-e2e-1');
+    }
+  });
+
+  it('returns 503 when a mandatory publish is unroutable', async () => {
+    const channel = app.get(AmqpConnection).channel;
+    await channel.unbindQueue(
+      WORK_QUEUE,
+      WEBHOOK_EXCHANGE,
+      ORDER_RECEIVED_ROUTING_KEY,
+    );
+    try {
+      const body = JSON.stringify({
+        event_id: 'evt-e2e-5',
+        event_type: 'order.created',
+        payload: { amount: 1 },
+      });
+      const ts = String(Math.floor(Date.now() / 1000));
+
+      await request(app.getHttpServer())
+        .post('/webhooks/orders')
+        .set('content-type', 'application/json')
+        .set('x-timestamp', ts)
+        .set('x-signature', sign(ts, body))
+        .send(body)
+        .expect(503);
+    } finally {
+      await channel.bindQueue(
+        WORK_QUEUE,
+        WEBHOOK_EXCHANGE,
+        ORDER_RECEIVED_ROUTING_KEY,
+      );
+    }
   });
 });
