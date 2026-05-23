@@ -30,6 +30,9 @@ export class Event {
   @Column({ type: 'int', default: 0 })
   attempts: number;
 
+  @Column({ name: 'duplicate_count', type: 'int', default: 0 })
+  duplicateCount: number;
+
   @Index('IDX_events_correlation_id')
   @Column({ name: 'correlation_id', type: 'varchar', length: 255 })
   correlationId: string;
