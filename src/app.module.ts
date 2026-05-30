@@ -4,6 +4,7 @@ import { APP_PIPE } from '@nestjs/core';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { buildDataSourceOptions } from './config/typeorm.config';
 import { ConsumerModule } from './consumer/consumer.module';
+import { DlqModule } from './dlq/dlq.module';
 import { EventsModule } from './events/events.module';
 import { HealthModule } from './health/health.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
@@ -22,6 +23,7 @@ const roleModules = process.env.APP_ROLE === 'worker' ? [ConsumerModule] : [];
     EventsModule,
     HealthModule,
     WebhooksModule,
+    DlqModule,
     ...roleModules,
   ],
   providers: [

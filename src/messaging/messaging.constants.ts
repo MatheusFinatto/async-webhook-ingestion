@@ -8,6 +8,8 @@ export const DEAD_LETTER_ROUTING_KEY = 'orders.dead';
 export const WORK_QUEUE = 'webhooks.orders';
 export const DEAD_LETTER_QUEUE = 'webhooks.dead';
 
+export const ATTEMPT_HEADER = 'x-attempt';
+
 export interface RetryTier {
   queue: string;
   routingKey: string;
@@ -27,3 +29,8 @@ export const RETRY_TIERS: RetryTier[] = [
     ttlMs: 120_000,
   },
 ];
+
+export function retryTierForAttempt(attempts: number): RetryTier {
+  const index = Math.min(Math.max(attempts - 1, 0), RETRY_TIERS.length - 1);
+  return RETRY_TIERS[index];
+}

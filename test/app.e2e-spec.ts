@@ -30,6 +30,7 @@ import {
 jest.setTimeout(180_000);
 
 const HMAC_SECRET = 'e2e-secret';
+const ADMIN_KEY = 'e2e-admin-key';
 
 function sign(timestamp: string, rawBody: string): string {
   return createHmac('sha256', HMAC_SECRET)
@@ -58,6 +59,7 @@ describe('App (e2e)', () => {
     process.env.RABBITMQ_URL = `amqp://guest:guest@${rabbit.getHost()}:${rabbit.getMappedPort(5672)}`;
     process.env.WEBHOOK_HMAC_SECRET = HMAC_SECRET;
     process.env.WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS = '300';
+    process.env.ADMIN_API_KEY = ADMIN_KEY;
 
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
@@ -131,6 +133,35 @@ describe('App (e2e)', () => {
     const row = await repo.findOneByOrFail({ correlationId: 'corr-dead' });
     expect(row.eventId).toBeNull();
     expect(row.reason).toBe('unparseable payload');
+  });
+
+  it('rejects GET /dlq without an admin key (401)', () => {
+    return request(app.getHttpServer()).get('/dlq').expect(401);
+  });
+
+  it('rejects GET /dlq with a wrong admin key (403)', () => {
+    return request(app.getHttpServer())
+      .get('/dlq')
+      .set('x-admin-key', 'wrong-key')
+      .expect(403);
+  });
+
+  it('lists dead messages with a valid admin key', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/dlq')
+      .set('x-admin-key', ADMIN_KEY)
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      page: 1,
+      limit: 20,
+      total: expect.any(Number),
+    });
+    expect(
+      response.body.data.some(
+        (m: { correlationId: string }) => m.correlationId === 'corr-dead',
+      ),
+    ).toBe(true);
   });
 
   it('accepts a signed webhook with 202 and echoes the correlation id', async () => {
