@@ -11,6 +11,7 @@ import { GenericContainer, StartedTestContainer, Wait } from 'testcontainers';
 import { AmqpConnection } from '@golevelup/nestjs-rabbitmq';
 import { DataSource, Repository } from 'typeorm';
 import { AppModule } from '../src/app.module';
+import { JsonLogger } from '../src/common/json-logger';
 import { Event } from '../src/events/entities/event.entity';
 import { EventStatus } from '../src/events/event-status.enum';
 import {
@@ -83,6 +84,7 @@ describe('Consumer (e2e)', () => {
       imports: [AppModule],
     }).compile();
     app = await moduleRef.init();
+    app.useLogger(app.get(JsonLogger));
 
     const dataSource = app.get(DataSource);
     await dataSource.runMigrations();
@@ -102,6 +104,36 @@ describe('Consumer (e2e)', () => {
     const row = await waitFor(findProcessed('evt-consume-1'));
     expect(row.correlationId).toBe('corr-consume-1');
     expect(row.status).toBe(EventStatus.Processed);
+  });
+
+  it('carries the correlation id into worker logs and the row', async () => {
+    const lines: Record<string, unknown>[] = [];
+    const spy = jest
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        try {
+          lines.push(JSON.parse(String(chunk)) as Record<string, unknown>);
+        } catch {
+          return true;
+        }
+        return true;
+      });
+
+    let row: Event;
+    try {
+      await publish('evt-ca06-worker', 'corr-ca06-worker');
+      row = await waitFor(findProcessed('evt-ca06-worker'));
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(row.correlationId).toBe('corr-ca06-worker');
+    const workerLog = lines.find(
+      (line) =>
+        line.correlation_id === 'corr-ca06-worker' &&
+        line.event_id === 'evt-ca06-worker',
+    );
+    expect(workerLog).toBeDefined();
   });
 
   it('deduplicates a repeated delivery, processing once', async () => {

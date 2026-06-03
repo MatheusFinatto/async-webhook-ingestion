@@ -6,6 +6,7 @@ import { Repository } from 'typeorm';
 import { DlqMessage } from '../events/entities/dlq-message.entity';
 import { Event } from '../events/entities/event.entity';
 import { EventStatus } from '../events/event-status.enum';
+import { runWithCorrelationId } from '../common/correlation-context';
 import {
   DEAD_LETTER_EXCHANGE,
   DEAD_LETTER_QUEUE,
@@ -56,25 +57,32 @@ export class DlqConsumer {
         : null) ??
       'unknown';
 
-    try {
-      await this.dlqMessages.insert({
-        messageId:
-          typeof amqpMessage.properties.messageId === 'string'
-            ? amqpMessage.properties.messageId
-            : eventId,
-        correlationId,
-        eventId,
-        reason: typeof dead.reason === 'string' ? dead.reason : 'unknown',
-        attempts: typeof dead.attempts === 'number' ? dead.attempts : 0,
-        payload: typeof dead.payload === 'string' ? dead.payload : raw,
-      });
-      if (eventId) {
-        await this.events.update({ eventId }, { status: EventStatus.Dead });
+    return runWithCorrelationId(correlationId, async () => {
+      try {
+        await this.dlqMessages.insert({
+          messageId:
+            typeof amqpMessage.properties.messageId === 'string'
+              ? amqpMessage.properties.messageId
+              : eventId,
+          correlationId,
+          eventId,
+          reason: typeof dead.reason === 'string' ? dead.reason : 'unknown',
+          attempts: typeof dead.attempts === 'number' ? dead.attempts : 0,
+          payload: typeof dead.payload === 'string' ? dead.payload : raw,
+        });
+        if (eventId) {
+          await this.events.update({ eventId }, { status: EventStatus.Dead });
+        }
+        this.logger.warn({
+          message: 'persisted dead letter',
+          event_id: eventId,
+          correlation_id: correlationId,
+        });
+      } catch (error) {
+        this.logger.error('failed to persist dead letter', error as Error);
+        return new Nack(true);
       }
-    } catch (error) {
-      this.logger.error('failed to persist dead letter', error as Error);
-      return new Nack(true);
-    }
+    });
   }
 
   private parse(raw: string): DeadLetter {

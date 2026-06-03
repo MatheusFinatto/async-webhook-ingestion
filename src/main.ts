@@ -2,11 +2,14 @@ import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
+import { JsonLogger } from './common/json-logger';
 
 async function bootstrapApi(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     rawBody: true,
+    bufferLogs: true,
   });
+  app.useLogger(app.get(JsonLogger));
   app.useBodyParser('json', {
     limit: process.env.WEBHOOK_BODY_LIMIT ?? '100kb',
   });
@@ -17,7 +20,10 @@ async function bootstrapApi(): Promise<void> {
 }
 
 async function bootstrapWorker(): Promise<void> {
-  const app = await NestFactory.createApplicationContext(AppModule);
+  const app = await NestFactory.createApplicationContext(AppModule, {
+    bufferLogs: true,
+  });
+  app.useLogger(app.get(JsonLogger));
   app.enableShutdownHooks();
   Logger.log(
     'Worker role started (idle until the consumer phase)',

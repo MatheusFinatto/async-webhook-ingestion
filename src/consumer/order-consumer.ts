@@ -6,6 +6,7 @@ import {
 } from '@golevelup/nestjs-rabbitmq';
 import { ConsumeMessage } from 'amqplib';
 import { randomUUID } from 'node:crypto';
+import { runWithCorrelationId } from '../common/correlation-context';
 import {
   ATTEMPT_HEADER,
   DEAD_LETTER_EXCHANGE,
@@ -55,13 +56,26 @@ export class OrderConsumer {
   ): Promise<Nack | void> {
     const raw = amqpMessage.content.toString('utf8');
     const correlationId = this.correlationOf(amqpMessage, raw);
+    return runWithCorrelationId(correlationId, () =>
+      this.consume(correlationId, raw, amqpMessage),
+    );
+  }
 
+  private async consume(
+    correlationId: string,
+    raw: string,
+    amqpMessage: ConsumeMessage,
+  ): Promise<Nack | void> {
     const parsed = this.parse(raw);
     if (
       !parsed ||
       typeof parsed.event_id !== 'string' ||
       parsed.event_id.length === 0
     ) {
+      this.logger.warn({
+        message: 'dead-lettering unparseable message',
+        correlation_id: correlationId,
+      });
       await this.toDeadLetter({
         eventId: null,
         correlationId,
@@ -86,6 +100,13 @@ export class OrderConsumer {
       amqpMessage.properties.headers?.[ATTEMPT_HEADER] !== undefined ||
       amqpMessage.fields.redelivered === true;
 
+    this.logger.log({
+      message: 'consuming event',
+      event_id: event.eventId,
+      correlation_id: correlationId,
+      is_continuation: isContinuation,
+    });
+
     let decision;
     try {
       decision = await this.processor.process(event, { isContinuation });
@@ -96,6 +117,13 @@ export class OrderConsumer {
       );
       return new Nack(true);
     }
+
+    this.logger.log({
+      message: 'processing decision',
+      event_id: event.eventId,
+      correlation_id: correlationId,
+      decision: decision.kind,
+    });
 
     switch (decision.kind) {
       case 'processed':

@@ -1,4 +1,4 @@
-import { Injectable, OnApplicationBootstrap } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AmqpConnection } from '@golevelup/nestjs-rabbitmq';
 import { ConfirmChannel, ConsumeMessage } from 'amqplib';
@@ -14,6 +14,7 @@ export class RabbitEventPublisher
   extends EventPublisher
   implements OnApplicationBootstrap
 {
+  private readonly logger = new Logger(RabbitEventPublisher.name);
   private readonly confirmTimeoutMs: number;
   private readonly pendingReturns = new Map<string, () => void>();
 
@@ -70,6 +71,11 @@ export class RabbitEventPublisher
     if (returned) {
       throw new Error('message returned as unroutable');
     }
+    this.logger.log({
+      message: 'published, awaiting consumption',
+      event_id: event.event_id,
+      correlation_id: correlationId,
+    });
   }
 
   private withTimeout(confirm: Promise<boolean>): Promise<void> {

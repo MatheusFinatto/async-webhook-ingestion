@@ -1,7 +1,6 @@
 import {
   Body,
   Controller,
-  Headers,
   HttpCode,
   HttpStatus,
   Post,
@@ -9,6 +8,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
+import { currentCorrelationId } from '../common/correlation-context';
 import { EventPublisher } from './event-publisher';
 import { OrderWebhookDto } from './dto/order-webhook.dto';
 import { WebhookSignatureGuard } from './webhook-signature.guard';
@@ -22,9 +22,8 @@ export class WebhooksController {
   @UseGuards(WebhookSignatureGuard)
   async ingestOrder(
     @Body() event: OrderWebhookDto,
-    @Headers('x-correlation-id') incomingCorrelationId?: string,
   ): Promise<{ correlation_id: string; status: string }> {
-    const correlationId = incomingCorrelationId || randomUUID();
+    const correlationId = currentCorrelationId() ?? randomUUID();
     try {
       await this.publisher.publish(event, correlationId);
     } catch {

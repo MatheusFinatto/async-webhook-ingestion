@@ -14,6 +14,7 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { DataSource, QueryFailedError } from 'typeorm';
 import { AppModule } from '../src/app.module';
+import { JsonLogger } from '../src/common/json-logger';
 import { DlqMessage } from '../src/events/entities/dlq-message.entity';
 import { Event } from '../src/events/entities/event.entity';
 import { EventStatus } from '../src/events/event-status.enum';
@@ -36,6 +37,28 @@ function sign(timestamp: string, rawBody: string): string {
   return createHmac('sha256', HMAC_SECRET)
     .update(`${timestamp}.${rawBody}`)
     .digest('hex');
+}
+
+async function captureLogs(
+  action: () => Promise<void>,
+): Promise<Record<string, unknown>[]> {
+  const lines: Record<string, unknown>[] = [];
+  const spy = jest
+    .spyOn(process.stdout, 'write')
+    .mockImplementation((chunk: string | Uint8Array): boolean => {
+      try {
+        lines.push(JSON.parse(String(chunk)) as Record<string, unknown>);
+      } catch {
+        return true;
+      }
+      return true;
+    });
+  try {
+    await action();
+  } finally {
+    spy.mockRestore();
+  }
+  return lines;
 }
 
 describe('App (e2e)', () => {
@@ -68,6 +91,7 @@ describe('App (e2e)', () => {
       INestApplication<App> & NestExpressApplication
     >({ rawBody: true });
     app.useBodyParser('json', { limit: '1kb' });
+    app.useLogger(app.get(JsonLogger));
     await app.init();
     dataSource = app.get(DataSource);
   });
@@ -185,6 +209,55 @@ describe('App (e2e)', () => {
       correlation_id: 'corr-e2e-1',
       status: 'accepted',
     });
+  });
+
+  it('logs the blind window with the request correlation id', async () => {
+    const body = JSON.stringify({
+      event_id: 'evt-ca06',
+      event_type: 'order.created',
+      payload: { amount: 5 },
+    });
+    const ts = String(Math.floor(Date.now() / 1000));
+
+    const logs = await captureLogs(async () => {
+      await request(app.getHttpServer())
+        .post('/webhooks/orders')
+        .set('content-type', 'application/json')
+        .set('x-timestamp', ts)
+        .set('x-signature', sign(ts, body))
+        .set('x-correlation-id', 'corr-ca06')
+        .send(body)
+        .expect(202);
+    });
+
+    const published = logs.find(
+      (line) =>
+        line.message === 'published, awaiting consumption' &&
+        line.correlation_id === 'corr-ca06',
+    );
+    expect(published).toBeDefined();
+    expect(published?.event_id).toBe('evt-ca06');
+  });
+
+  it('sets the correlation id response header, generating one when absent', async () => {
+    const body = JSON.stringify({
+      event_id: 'evt-ca06-hdr',
+      event_type: 'order.created',
+      payload: { amount: 5 },
+    });
+    const ts = String(Math.floor(Date.now() / 1000));
+
+    const response = await request(app.getHttpServer())
+      .post('/webhooks/orders')
+      .set('content-type', 'application/json')
+      .set('x-timestamp', ts)
+      .set('x-signature', sign(ts, body))
+      .send(body)
+      .expect(202);
+
+    expect(response.headers['x-correlation-id']).toBe(
+      response.body.correlation_id,
+    );
   });
 
   it('rejects an invalid signature with 401', async () => {
