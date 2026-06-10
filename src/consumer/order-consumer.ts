@@ -17,6 +17,8 @@ import {
   WORK_QUEUE,
   retryTierForAttempt,
 } from '../messaging/messaging.constants';
+import { EventStatus } from '../events/event-status.enum';
+import { TelemetryEmitter } from '../telemetry/telemetry-emitter';
 import { IdempotentEventProcessor } from './idempotent-event-processor';
 
 interface OrderMessage {
@@ -41,6 +43,7 @@ export class OrderConsumer {
   constructor(
     private readonly processor: IdempotentEventProcessor,
     private readonly amqp: AmqpConnection,
+    private readonly telemetry: TelemetryEmitter,
   ) {}
 
   @RabbitSubscribe({
@@ -83,6 +86,14 @@ export class OrderConsumer {
         attempts: 0,
         payload: raw,
       });
+      this.telemetry.emit({
+        stage: 'dead',
+        correlationId,
+        eventId: null,
+        eventType: 'unknown',
+        status: EventStatus.Dead,
+        attempts: 0,
+      });
       return;
     }
 
@@ -106,6 +117,14 @@ export class OrderConsumer {
       correlation_id: correlationId,
       is_continuation: isContinuation,
     });
+    this.telemetry.emit({
+      stage: 'consuming',
+      correlationId,
+      eventId: event.eventId,
+      eventType: event.eventType,
+      status: EventStatus.Received,
+      attempts: 0,
+    });
 
     let decision;
     try {
@@ -123,6 +142,14 @@ export class OrderConsumer {
       event_id: event.eventId,
       correlation_id: correlationId,
       decision: decision.kind,
+    });
+    this.telemetry.emit({
+      stage: 'processing_decision',
+      correlationId,
+      eventId: event.eventId,
+      eventType: event.eventType,
+      status: decision.kind,
+      attempts: decision.attempts,
     });
 
     switch (decision.kind) {
@@ -159,6 +186,14 @@ export class OrderConsumer {
           reason: decision.reason,
           attempts: decision.attempts,
           payload: raw,
+        });
+        this.telemetry.emit({
+          stage: 'dead',
+          correlationId,
+          eventId: event.eventId,
+          eventType: event.eventType,
+          status: EventStatus.Dead,
+          attempts: decision.attempts,
         });
         return;
     }

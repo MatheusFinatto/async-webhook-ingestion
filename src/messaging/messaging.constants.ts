@@ -1,6 +1,13 @@
 export const WEBHOOK_EXCHANGE = 'webhooks';
 export const RETRY_EXCHANGE = 'webhooks.retry';
 export const DEAD_LETTER_EXCHANGE = 'webhooks.dlx';
+export const TELEMETRY_EXCHANGE = 'webhook.telemetry';
+
+export const TELEMETRY_ENVELOPE_VERSION = 1;
+
+export function telemetryRoutingKey(stage: string): string {
+  return `telemetry.${stage}`;
+}
 
 export const ORDER_RECEIVED_ROUTING_KEY = 'orders.received';
 export const DEAD_LETTER_ROUTING_KEY = 'orders.dead';

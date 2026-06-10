@@ -8,7 +8,7 @@ export interface HandledEvent {
 }
 
 export abstract class OrderHandler {
-  abstract handle(event: HandledEvent): Promise<void>;
+  abstract handle(event: HandledEvent, attempt: number): Promise<void>;
 }
 
 @Injectable()

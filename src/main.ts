@@ -2,6 +2,7 @@ import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
+import { assertDemoModeAllowed } from './common/demo-mode';
 import { JsonLogger } from './common/json-logger';
 
 async function bootstrapApi(): Promise<void> {
@@ -42,6 +43,7 @@ async function bootstrapWorker(): Promise<void> {
 }
 
 async function bootstrap(): Promise<void> {
+  assertDemoModeAllowed();
   const role = process.env.APP_ROLE ?? 'api';
   if (role === 'worker') {
     await bootstrapWorker();

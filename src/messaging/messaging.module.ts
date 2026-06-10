@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { RabbitMQModule } from '@golevelup/nestjs-rabbitmq';
+import { isDemoMode } from '../common/demo-mode';
 import {
   DEAD_LETTER_EXCHANGE,
   DEAD_LETTER_QUEUE,
@@ -8,9 +9,20 @@ import {
   ORDER_RECEIVED_ROUTING_KEY,
   RETRY_EXCHANGE,
   RETRY_TIERS,
+  TELEMETRY_EXCHANGE,
   WEBHOOK_EXCHANGE,
   WORK_QUEUE,
 } from './messaging.constants';
+
+const demoExchanges = isDemoMode()
+  ? [
+      {
+        name: TELEMETRY_EXCHANGE,
+        type: 'topic' as const,
+        options: { durable: false },
+      },
+    ]
+  : [];
 
 function buildAmqpUri(config: ConfigService): string {
   const explicit = config.get<string>('RABBITMQ_URL');
@@ -37,6 +49,7 @@ function buildAmqpUri(config: ConfigService): string {
             type: 'topic',
             options: { durable: true },
           },
+          ...demoExchanges,
         ],
         queues: [
           {

@@ -11,6 +11,7 @@ import {
   IdempotentEventProcessor,
   ProcessDecision,
 } from './idempotent-event-processor';
+import { TelemetryEmitter } from '../telemetry/telemetry-emitter';
 import { OrderConsumer } from './order-consumer';
 
 function message(
@@ -37,6 +38,7 @@ function message(
 describe('OrderConsumer', () => {
   let processor: { process: jest.Mock };
   let amqp: { publish: jest.Mock };
+  let telemetry: { emit: jest.Mock };
   let consumer: OrderConsumer;
 
   const validBody = {
@@ -49,9 +51,11 @@ describe('OrderConsumer', () => {
   beforeEach(() => {
     processor = { process: jest.fn() };
     amqp = { publish: jest.fn().mockResolvedValue(true) };
+    telemetry = { emit: jest.fn() };
     consumer = new OrderConsumer(
       processor as unknown as IdempotentEventProcessor,
       amqp as unknown as AmqpConnection,
+      telemetry as unknown as TelemetryEmitter,
     );
   });
 
@@ -60,13 +64,13 @@ describe('OrderConsumer', () => {
   }
 
   it('acks a processed event without publishing', async () => {
-    decide({ kind: 'processed' });
+    decide({ kind: 'processed', attempts: 1 });
     await consumer.handle(validBody, message(validBody));
     expect(amqp.publish).not.toHaveBeenCalled();
   });
 
   it('acks a duplicate without publishing', async () => {
-    decide({ kind: 'duplicate' });
+    decide({ kind: 'duplicate', attempts: 1 });
     await consumer.handle(validBody, message(validBody));
     expect(amqp.publish).not.toHaveBeenCalled();
   });
@@ -98,7 +102,7 @@ describe('OrderConsumer', () => {
   });
 
   it('marks a delivery from the retry queue as a continuation', async () => {
-    decide({ kind: 'processed' });
+    decide({ kind: 'processed', attempts: 1 });
     await consumer.handle(
       validBody,
       message(validBody, { headers: { [ATTEMPT_HEADER]: 2 } }),
@@ -106,6 +110,35 @@ describe('OrderConsumer', () => {
     expect(processor.process).toHaveBeenCalledWith(expect.anything(), {
       isContinuation: true,
     });
+  });
+
+  it('emits the consuming and decision stages for a handled event', async () => {
+    decide({ kind: 'processed', attempts: 1 });
+    await consumer.handle(validBody, message(validBody));
+
+    expect(
+      telemetry.emit.mock.calls.map(
+        (call: [{ stage: string }]) => call[0].stage,
+      ),
+    ).toEqual(['consuming', 'processing_decision']);
+    expect(telemetry.emit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: 'processing_decision',
+        correlationId: 'corr-1',
+        eventId: 'evt-1',
+        status: 'processed',
+        attempts: 1,
+      }),
+    );
+  });
+
+  it('emits the dead stage when the decision is dead', async () => {
+    decide({ kind: 'dead', attempts: 3, reason: 'poison' });
+    await consumer.handle(validBody, message(validBody));
+
+    expect(telemetry.emit).toHaveBeenCalledWith(
+      expect.objectContaining({ stage: 'dead', eventId: 'evt-1', attempts: 3 }),
+    );
   });
 
   it('dead-letters an unparseable payload without touching the processor', async () => {

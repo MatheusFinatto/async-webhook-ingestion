@@ -3,12 +3,13 @@ import { ConfigService } from '@nestjs/config';
 import { DataSource, QueryDeepPartialEntity } from 'typeorm';
 import { Event } from '../events/entities/event.entity';
 import { EventStatus } from '../events/event-status.enum';
+import { TelemetryEmitter } from '../telemetry/telemetry-emitter';
 import { HandledEvent, OrderHandler } from './order-handler';
 import { PermanentProcessingError } from './processing-errors';
 
 export type ProcessDecision =
-  | { kind: 'processed' }
-  | { kind: 'duplicate' }
+  | { kind: 'processed'; attempts: number }
+  | { kind: 'duplicate'; attempts: number }
   | { kind: 'retry'; attempts: number }
   | { kind: 'dead'; attempts: number; reason: string };
 
@@ -31,6 +32,7 @@ export class IdempotentEventProcessor {
   constructor(
     private readonly dataSource: DataSource,
     private readonly handler: OrderHandler,
+    private readonly telemetry: TelemetryEmitter,
     config: ConfigService,
   ) {
     this.maxAttempts = Number(
@@ -39,6 +41,35 @@ export class IdempotentEventProcessor {
   }
 
   async process(
+    event: HandledEvent,
+    context: ProcessContext,
+  ): Promise<ProcessDecision> {
+    const decision = await this.claimAndHandle(event, context);
+    this.emit(event, decision);
+    return decision;
+  }
+
+  private emit(event: HandledEvent, decision: ProcessDecision): void {
+    if (decision.kind === 'dead') {
+      return;
+    }
+    const status =
+      decision.kind === 'processed'
+        ? EventStatus.Processed
+        : decision.kind === 'duplicate'
+          ? EventStatus.Processed
+          : EventStatus.Processing;
+    this.telemetry.emit({
+      stage: decision.kind,
+      correlationId: event.correlationId,
+      eventId: event.eventId,
+      eventType: event.eventType,
+      status,
+      attempts: decision.attempts,
+    });
+  }
+
+  private async claimAndHandle(
     event: HandledEvent,
     context: ProcessContext,
   ): Promise<ProcessDecision> {
@@ -75,7 +106,7 @@ export class IdempotentEventProcessor {
           'duplicateCount',
           1,
         );
-        return { kind: 'duplicate' };
+        return { kind: 'duplicate', attempts: row.attempts };
       }
 
       if (!claimed && !context.isContinuation) {
@@ -85,7 +116,7 @@ export class IdempotentEventProcessor {
           'duplicateCount',
           1,
         );
-        return { kind: 'duplicate' };
+        return { kind: 'duplicate', attempts: row.attempts };
       }
 
       const attempts = row.attempts + 1;
@@ -96,7 +127,7 @@ export class IdempotentEventProcessor {
       );
 
       try {
-        await this.handler.handle(event);
+        await this.handler.handle(event, attempts);
       } catch (error) {
         const permanent = error instanceof PermanentProcessingError;
         const reason = error instanceof Error ? error.message : String(error);
@@ -121,7 +152,7 @@ export class IdempotentEventProcessor {
         { eventId: event.eventId },
         { status: EventStatus.Processed, failureReason: null },
       );
-      return { kind: 'processed' };
+      return { kind: 'processed', attempts };
     });
   }
 }
