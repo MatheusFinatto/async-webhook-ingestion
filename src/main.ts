@@ -2,7 +2,11 @@ import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
-import { assertDemoModeAllowed } from './common/demo-mode';
+import {
+  assertDemoModeAllowed,
+  demoWebOrigin,
+  isDemoMode,
+} from './common/demo-mode';
 import { JsonLogger } from './common/json-logger';
 
 async function bootstrapApi(): Promise<void> {
@@ -14,6 +18,20 @@ async function bootstrapApi(): Promise<void> {
   app.useBodyParser('json', {
     limit: process.env.WEBHOOK_BODY_LIMIT ?? '100kb',
   });
+  if (isDemoMode()) {
+    app.enableCors({
+      origin: demoWebOrigin(),
+      methods: ['GET', 'POST', 'OPTIONS'],
+      allowedHeaders: [
+        'content-type',
+        'x-signature',
+        'x-timestamp',
+        'x-correlation-id',
+        'x-admin-key',
+      ],
+      exposedHeaders: ['x-correlation-id'],
+    });
+  }
   app.enableShutdownHooks();
   const port = Number(process.env.PORT ?? 3000);
   await app.listen(port);

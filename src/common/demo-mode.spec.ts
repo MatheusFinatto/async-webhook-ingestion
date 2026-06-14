@@ -1,4 +1,9 @@
-import { assertDemoModeAllowed, isDemoMode } from './demo-mode';
+import {
+  DEFAULT_WEB_ORIGIN,
+  assertDemoModeAllowed,
+  demoWebOrigin,
+  isDemoMode,
+} from './demo-mode';
 
 describe('isDemoMode', () => {
   it('is on only for the exact string "true"', () => {
@@ -11,6 +16,25 @@ describe('isDemoMode', () => {
       expect(isDemoMode(value)).toBe(false);
     },
   );
+});
+
+describe('demoWebOrigin', () => {
+  it('uses the configured origin', () => {
+    expect(demoWebOrigin('https://demo.example.com')).toBe(
+      'https://demo.example.com',
+    );
+  });
+
+  it.each(['', undefined])(
+    'falls back to the local dev origin for %p',
+    (value) => {
+      expect(demoWebOrigin(value)).toBe(DEFAULT_WEB_ORIGIN);
+    },
+  );
+
+  it('never resolves to a wildcard origin', () => {
+    expect(demoWebOrigin(undefined)).not.toBe('*');
+  });
 });
 
 describe('assertDemoModeAllowed', () => {

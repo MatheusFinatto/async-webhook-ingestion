@@ -1,16 +1,25 @@
-import { Module, ValidationPipe } from '@nestjs/common';
+import { Module, ModuleMetadata, ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_PIPE } from '@nestjs/core';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { isDemoMode } from './common/demo-mode';
 import { ObservabilityModule } from './common/observability.module';
 import { buildDataSourceOptions } from './config/typeorm.config';
 import { ConsumerModule } from './consumer/consumer.module';
 import { DlqModule } from './dlq/dlq.module';
 import { EventsModule } from './events/events.module';
 import { HealthModule } from './health/health.module';
+import { TelemetryGatewayModule } from './telemetry/telemetry-gateway.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 
-const roleModules = process.env.APP_ROLE === 'worker' ? [ConsumerModule] : [];
+function resolveRoleModules(): NonNullable<ModuleMetadata['imports']> {
+  if (process.env.APP_ROLE === 'worker') {
+    return [ConsumerModule];
+  }
+  return isDemoMode() ? [TelemetryGatewayModule] : [];
+}
+
+const roleModules = resolveRoleModules();
 
 @Module({
   imports: [

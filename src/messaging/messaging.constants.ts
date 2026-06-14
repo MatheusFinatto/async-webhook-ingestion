@@ -4,6 +4,7 @@ export const DEAD_LETTER_EXCHANGE = 'webhooks.dlx';
 export const TELEMETRY_EXCHANGE = 'webhook.telemetry';
 
 export const TELEMETRY_ENVELOPE_VERSION = 1;
+export const TELEMETRY_BINDING_KEY = 'telemetry.*';
 
 export function telemetryRoutingKey(stage: string): string {
   return `telemetry.${stage}`;
