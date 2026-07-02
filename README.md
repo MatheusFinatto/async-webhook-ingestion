@@ -61,11 +61,65 @@ Inspecting the dead-letter queue:
 curl -H "x-admin-key: $ADMIN_API_KEY" http://localhost:3000/dlq
 ```
 
+## Live demo
+
+A single-page visualizer in [`web/`](./web) shows the pipeline processing real events:
+each scenario fires an actual signed `POST /webhooks/orders`, and every worker stage is
+streamed to the browser over a WebSocket telemetry feed. It is opt-in and lives entirely
+behind `DEMO_MODE`; with the flag off the ingestion path is byte-for-byte the base system
+and the p99 above is preserved.
+
+Everything demo-specific is in an override file. The base `docker-compose.yml` is
+untouched, so `docker compose up` still brings up production behaviour.
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.demo.yml up --build
+```
+
+This requires **Docker Compose ≥ 2.24.4** (the override uses `!override` to replace the
+published port rather than append to it). The API is published on `127.0.0.1:3000` only,
+and the visualizer on `http://localhost:5173`.
+
+The override turns on `DEMO_MODE`, drops `NODE_ENV` to `development` (the image ships
+`production`, under which the demo refuses to boot), and maps two **public-by-design**
+credentials onto the real env names the guards read:
+
+- `DEMO_WEBHOOK_HMAC_SECRET` → `WEBHOOK_HMAC_SECRET` (default `demo-hmac-secret-public`)
+- `DEMO_ADMIN_API_KEY` → `ADMIN_API_KEY` (default `demo-admin-key-public`)
+
+These are demo values only. The browser signs with the same public secret through
+WebCrypto, so the real HMAC guard runs and returns real `202` / `400` / `401`. No partner
+secret is ever exposed to the browser.
+
+The seven scenario buttons cover the happy path, an invalid signature, a stale timestamp,
+a duplicate `event_id`, a transient failure that climbs the retry ladder, a permanent
+failure that dead-letters, and a malformed body rejected at the validation pipe.
+
+### Seeing a real 503
+
+The `503` is not one of the buttons. It needs the broker down, which also takes the
+telemetry feed and `GET /dlq` with it. Reproduce it manually:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.demo.yml stop rabbitmq
+# then click "Happy path" in the visualizer
+```
+
+The publish-and-confirm never gets its acknowledgement, so the API returns a real `503`.
+The visualizer shows the response and drops into its "backend offline" state at the same
+time, because the WebSocket feed and the DLQ endpoint both depend on RabbitMQ.
+
 ## Tests
 
 ```bash
 npm test          # unit
 npm run test:e2e  # end-to-end against Postgres and RabbitMQ (Testcontainers)
+```
+
+The visualizer has its own checks (`cd web`):
+
+```bash
+npm run typecheck && npm run lint && npm run build && npm test
 ```
 
 ## Latency
