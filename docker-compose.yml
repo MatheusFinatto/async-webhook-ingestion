@@ -38,7 +38,11 @@ services:
       # regardless of PORT in .env (which only shifts the host side of the mapping below).
       PORT: 3000
       POSTGRES_HOST: postgres
+      # Internal service ports: .env's *_PORT are host-mapping ports (e.g. 55432),
+      # which would otherwise leak in via env_file and be dialed inside the network.
+      POSTGRES_PORT: 5432
       RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
     # .env is optional: it does not exist on a clean clone / in CI, and the infra vars
     # already carry defaults via interpolation. Real runs supply secrets through it.
     env_file:
@@ -69,7 +73,9 @@ services:
     environment:
       APP_ROLE: worker
       POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
       RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
     env_file:
       - path: .env
         required: false
