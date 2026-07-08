@@ -81,7 +81,7 @@ export default function App() {
           <button
             type="button"
             onClick={toggle}
-            className="rounded-md border border-border-subtle bg-surface px-3 py-1.5 text-sm hover:border-border-strong"
+            className="cursor-pointer rounded-md border border-border-subtle bg-surface px-3 py-1.5 text-sm transition-colors hover:border-border-strong"
           >
             {theme === 'dark' ? 'Light' : 'Dark'}
           </button>

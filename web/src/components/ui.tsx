@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { STAGE_META } from '../lib/stages';
+import { statusColor } from '../lib/status';
 import type { Stage } from '../lib/telemetry';
 
 export function Panel({
@@ -37,17 +38,8 @@ export function StageDot({ stage }: { stage: Stage }) {
   );
 }
 
-const STATUS_COLOR: Record<string, string> = {
-  '2': 'var(--color-stage-processed)',
-  '4': 'var(--color-stage-rejected)',
-  '5': 'var(--color-stage-unavailable)',
-};
-
 export function StatusBadge({ status }: { status: number }) {
-  const color =
-    status === 0
-      ? 'var(--text-faint)'
-      : STATUS_COLOR[String(status)[0]] ?? 'var(--text-muted)';
+  const color = statusColor(status);
   return (
     <span
       className="mono rounded px-2 py-0.5 text-xs font-semibold"
