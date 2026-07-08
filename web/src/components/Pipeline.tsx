@@ -33,8 +33,15 @@ interface PipelineProps {
   onSelect: (id: string) => void;
 }
 
+function tokenColor(token: Token): string {
+  return STAGE_META[token.currentStage].color;
+}
+
 export function Pipeline({ tokens, selectedId, now, onSelect }: PipelineProps) {
   const reduce = useReducedMotion();
+
+  const seqOf = new Map<string, number>();
+  tokens.forEach((token, index) => seqOf.set(token.correlationId, index + 1));
 
   const grouped = new Map<NodeKey, Token[]>();
   for (const token of tokens) {
@@ -61,6 +68,7 @@ export function Pipeline({ tokens, selectedId, now, onSelect }: PipelineProps) {
   }
 
   return (
+    <div className="flex flex-col gap-2">
     <div className="overflow-x-auto rounded-lg border border-border-subtle bg-surface p-2">
       <svg
         viewBox={`0 0 ${VIEWBOX_W} ${VIEWBOX_H}`}
@@ -138,8 +146,8 @@ export function Pipeline({ tokens, selectedId, now, onSelect }: PipelineProps) {
               onClick={() => onSelect(token.correlationId)}
             >
               <circle
-                r={selectedId === token.correlationId ? 11 : 8}
-                fill={token.color}
+                r={selectedId === token.correlationId ? 12 : 9}
+                fill={tokenColor(token)}
                 stroke={
                   selectedId === token.correlationId
                     ? 'var(--text)'
@@ -148,8 +156,24 @@ export function Pipeline({ tokens, selectedId, now, onSelect }: PipelineProps) {
                 strokeWidth={2}
               />
               {token.terminal ? (
-                <circle r={13} fill="none" stroke={token.color} strokeWidth={1} />
+                <circle
+                  r={14}
+                  fill="none"
+                  stroke={tokenColor(token)}
+                  strokeWidth={1}
+                />
               ) : null}
+              <text
+                textAnchor="middle"
+                dominantBaseline="central"
+                fill="#0b0f1a"
+                fontSize={10}
+                fontWeight={700}
+                style={{ pointerEvents: 'none' }}
+                className="mono"
+              >
+                {seqOf.get(token.correlationId)}
+              </text>
               {remaining !== null ? (
                 <text
                   y={-16}
@@ -165,6 +189,34 @@ export function Pipeline({ tokens, selectedId, now, onSelect }: PipelineProps) {
           );
         })}
       </svg>
+    </div>
+      <div className="flex flex-wrap gap-x-4 gap-y-1.5 px-1 text-xs">
+        {tokens.map((token, index) => {
+          const color = tokenColor(token);
+          const isSelected = selectedId === token.correlationId;
+          return (
+            <button
+              key={token.correlationId}
+              type="button"
+              onClick={() => onSelect(token.correlationId)}
+              className={`flex cursor-pointer items-center gap-1.5 rounded px-1 py-0.5 transition-colors hover:bg-surface-2 ${
+                isSelected ? 'bg-surface-2' : ''
+              }`}
+            >
+              <span
+                className="mono inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-bold"
+                style={{ backgroundColor: color, color: '#0b0f1a' }}
+              >
+                {index + 1}
+              </span>
+              <span className="text-fg">{token.label}</span>
+              <span className="text-fg-faint">
+                {STAGE_META[token.currentStage].label}
+              </span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

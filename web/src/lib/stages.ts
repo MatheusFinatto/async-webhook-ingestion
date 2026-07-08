@@ -103,9 +103,9 @@ export const NODES: NodeSpec[] = [
   { key: 'work', label: 'work queue', sub: 'orders', x: 632, y: 92, w: NODE_W, h: NODE_H },
   { key: 'worker', label: 'worker', sub: 'idempotent', x: 784, y: 92, w: NODE_W, h: NODE_H },
   { key: 'postgres', label: 'PostgreSQL', sub: 'events', x: 936, y: 92, w: NODE_W, h: NODE_H },
-  { key: 'retry5s', label: 'retry 5s', sub: 'TTL+DLX', x: 632, y: 208, w: 96, h: 44 },
-  { key: 'retry30s', label: 'retry 30s', sub: 'TTL+DLX', x: 748, y: 208, w: 96, h: 44 },
-  { key: 'retry2min', label: 'retry 2min', sub: 'TTL+DLX', x: 864, y: 208, w: 96, h: 44 },
+  { key: 'retry5s', label: 'retry 5s', sub: 'TTL+DLX', x: 588, y: 208, w: 96, h: 44 },
+  { key: 'retry30s', label: 'retry 30s', sub: 'TTL+DLX', x: 704, y: 208, w: 96, h: 44 },
+  { key: 'retry2min', label: 'retry 2min', sub: 'TTL+DLX', x: 820, y: 208, w: 96, h: 44 },
   { key: 'dlq', label: 'DLQ', sub: 'dlq_messages', x: 936, y: 208, w: NODE_W, h: 44 },
 ];
 
