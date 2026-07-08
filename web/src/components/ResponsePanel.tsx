@@ -1,5 +1,20 @@
-import type { Token } from '../state/reducer';
+import { processingMs, type Token } from '../state/reducer';
 import { Empty, Panel, StatusBadge } from './ui';
+
+function Timing({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex flex-col rounded-md bg-surface-2 px-3 py-2">
+      <span className="text-[10px] uppercase tracking-wider text-fg-faint">
+        {label}
+      </span>
+      <span className="mono text-sm">{value}</span>
+    </div>
+  );
+}
+
+function formatMs(value: number): string {
+  return value >= 1000 ? `${(value / 1000).toFixed(2)} s` : `${value.toFixed(0)} ms`;
+}
 
 function formatBody(body: unknown): string {
   if (typeof body === 'string') {
@@ -21,11 +36,27 @@ export function ResponsePanel({ token }: { token: Token | null }) {
         <div className="flex flex-col gap-3">
           <div className="flex items-center justify-between">
             <StatusBadge status={token.httpStatus} />
-            <span className="mono text-xs text-fg-muted">
-              {token.latencyMs !== undefined
-                ? `${token.latencyMs.toFixed(1)} ms`
-                : ''}
-            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Timing
+              label="response"
+              value={
+                token.latencyMs !== undefined ? formatMs(token.latencyMs) : '—'
+              }
+            />
+            <Timing
+              label="processing"
+              value={(() => {
+                const value = processingMs(token);
+                if (value !== null) {
+                  return formatMs(value);
+                }
+                // Only a 202 was ever queued; 4xx/5xx are rejected at the API
+                // boundary and never reach the worker, so there is nothing to
+                // process; distinguish that from a 202 still in flight.
+                return token.httpStatus === 202 ? 'pending' : 'not queued';
+              })()}
+            />
           </div>
           <div className="mono text-xs text-fg-muted">
             <span className="text-fg-faint">correlation_id</span>{' '}

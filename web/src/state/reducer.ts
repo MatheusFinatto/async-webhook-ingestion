@@ -227,6 +227,47 @@ export function reducer(state: DemoState, action: Action): DemoState {
   }
 }
 
+const WORKER_TERMINALS: Stage[] = ['processed', 'duplicate', 'dead'];
+
+function stageBound(
+  token: Token,
+  stage: Stage,
+  pick: 'min' | 'max',
+): number | null {
+  const times = token.stages
+    .filter((event) => event.stage === stage)
+    .map((event) => Date.parse(event.ts))
+    .filter((value) => !Number.isNaN(value));
+  if (times.length === 0) {
+    return null;
+  }
+  return pick === 'min' ? Math.min(...times) : Math.max(...times);
+}
+
+// Worker-side duration from the first `consuming` to the terminal worker stage.
+// Both ends are server-clock envelope timestamps, so the delta is single-clock
+// (unlike anything spanning the client HTTP hop). For transient retries it
+// includes the TTL backoff waits; that IS the real time-in-system.
+export function processingMs(token: Token): number | null {
+  const start =
+    stageBound(token, 'consuming', 'min') ??
+    stageBound(token, 'processing_decision', 'min');
+  if (start === null) {
+    return null;
+  }
+  const terminal = WORKER_TERMINALS.find((stage) =>
+    token.stages.some((event) => event.stage === stage),
+  );
+  if (!terminal) {
+    return null;
+  }
+  const end = stageBound(token, terminal, 'max');
+  if (end === null) {
+    return null;
+  }
+  return Math.max(0, end - start);
+}
+
 export function percentile(values: number[], p: number): number | null {
   if (values.length === 0) {
     return null;
