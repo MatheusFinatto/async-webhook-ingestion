@@ -80,7 +80,7 @@ const RETRY_TTL: Record<string, number> = {
   '2min': 120000,
 };
 
-function retryTier(attempts: number): string {
+export function retryTier(attempts: number): string {
   if (attempts <= 1) {
     return '5s';
   }
@@ -211,7 +211,11 @@ export function reducer(state: DemoState, action: Action): DemoState {
           retryTier: tier,
           retryDeadline: action.now + RETRY_TTL[tier],
         };
-      } else {
+      } else if (token.currentStage !== 'retry') {
+        // The token has progressed past the retry stage (processed/dead), so the
+        // pending countdown no longer applies. While it is still 'retry', a
+        // lower-rank envelope from the next attempt (consuming/decision) must NOT
+        // wipe the tier, which reset it back to the 5s box mid-ladder.
         token = { ...token, retryDeadline: undefined, retryTier: undefined };
       }
       return {

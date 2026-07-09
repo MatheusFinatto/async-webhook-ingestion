@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { STAGE_META, type NodeKey } from '../lib/stages';
 import {
@@ -7,7 +8,11 @@ import {
   VIEWBOX_H,
   VIEWBOX_W,
 } from '../lib/stages';
-import type { Token } from '../state/reducer';
+import { retryTier, type Token } from '../state/reducer';
+
+// Dwell per node hop. Slow on purpose: the pipeline is a demo, so the token
+// should visibly walk each box it touches rather than teleport to the outcome.
+const STEP_MS = 850;
 
 function retryNode(tier: string | undefined): NodeKey {
   if (tier === '30s') {
@@ -19,11 +24,36 @@ function retryNode(tier: string | undefined): NodeKey {
   return 'retry5s';
 }
 
-function tokenNode(token: Token): NodeKey {
-  if (token.currentStage === 'retry') {
-    return retryNode(token.retryTier);
+// The ordered nodes a token has actually passed through, derived from its stage
+// history (rank-sorted upstream). Each retry attempt maps to its own tier box,
+// so the path itself carries the 5s->30s->2min ladder — no reliance on mutable
+// token fields that a mid-ladder envelope could reset.
+function nodePath(token: Token): NodeKey[] {
+  const path: NodeKey[] = [];
+  for (const event of token.stages) {
+    const node =
+      event.stage === 'retry'
+        ? retryNode(retryTier(event.attempts ?? 1))
+        : STAGE_META[event.stage].node;
+    if (path[path.length - 1] !== node) {
+      path.push(node);
+    }
   }
-  return STAGE_META[token.currentStage].node;
+  return path.length > 0 ? path : ['post'];
+}
+
+// Seconds the token has spent in the retry ladder, counting up from its first
+// retry envelope. A monotonic stopwatch: it cannot look frozen the way a
+// per-tier countdown did when the ladder stalled.
+function retryElapsed(token: Token, now: number): number | null {
+  const stamps = token.stages
+    .filter((event) => event.stage === 'retry')
+    .map((event) => Date.parse(event.ts))
+    .filter((value) => !Number.isNaN(value));
+  if (stamps.length === 0) {
+    return null;
+  }
+  return Math.max(0, Math.floor((now - Math.min(...stamps)) / 1000));
 }
 
 interface PipelineProps {
@@ -40,12 +70,52 @@ function tokenColor(token: Token): string {
 export function Pipeline({ tokens, selectedId, now, onSelect }: PipelineProps) {
   const reduce = useReducedMotion();
 
+  // Visual walk position per token: the index into nodePath() currently shown.
+  // A ticker advances it toward the real target one hop per STEP_MS, so a burst
+  // of stages that arrived in milliseconds is replayed as a paced journey while
+  // genuinely slow waits (retry TTLs) still dwell in real time.
+  const [walk, setWalk] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    if (reduce) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setWalk((prev) => {
+        let next = prev;
+        for (const token of tokens) {
+          const target = nodePath(token).length - 1;
+          const current = Math.min(prev[token.correlationId] ?? 0, target);
+          if (current < target) {
+            if (next === prev) {
+              next = { ...prev };
+            }
+            next[token.correlationId] = current + 1;
+          } else if (current !== (prev[token.correlationId] ?? 0)) {
+            if (next === prev) {
+              next = { ...prev };
+            }
+            next[token.correlationId] = current;
+          }
+        }
+        return next;
+      });
+    }, STEP_MS);
+    return () => window.clearInterval(timer);
+  }, [tokens, reduce]);
+
   const seqOf = new Map<string, number>();
   tokens.forEach((token, index) => seqOf.set(token.correlationId, index + 1));
 
   const grouped = new Map<NodeKey, Token[]>();
+  const visualNode = new Map<string, NodeKey>();
   for (const token of tokens) {
-    const key = tokenNode(token);
+    const path = nodePath(token);
+    const index = reduce
+      ? path.length - 1
+      : Math.min(walk[token.correlationId] ?? 0, path.length - 1);
+    const key = path[index];
+    visualNode.set(token.correlationId, key);
     const list = grouped.get(key) ?? [];
     list.push(token);
     grouped.set(key, list);
@@ -53,7 +123,7 @@ export function Pipeline({ tokens, selectedId, now, onSelect }: PipelineProps) {
 
   const positions = new Map<
     string,
-    { x: number; y: number; token: Token }
+    { x: number; y: number; token: Token; node: NodeKey }
   >();
   for (const [key, list] of grouped) {
     const center = nodeCenter(key);
@@ -63,6 +133,7 @@ export function Pipeline({ tokens, selectedId, now, onSelect }: PipelineProps) {
         x: center.x + spread,
         y: center.y - 34,
         token,
+        node: key,
       });
     });
   }
@@ -128,10 +199,9 @@ export function Pipeline({ tokens, selectedId, now, onSelect }: PipelineProps) {
           </g>
         ))}
 
-        {[...positions.values()].map(({ x, y, token }) => {
-          const remaining = token.retryDeadline
-            ? Math.max(0, Math.ceil((token.retryDeadline - now) / 1000))
-            : null;
+        {[...positions.values()].map(({ x, y, token, node }) => {
+          const onRetryBox = node.startsWith('retry');
+          const elapsed = onRetryBox ? retryElapsed(token, now) : null;
           return (
             <motion.g
               key={token.correlationId}
@@ -140,7 +210,7 @@ export function Pipeline({ tokens, selectedId, now, onSelect }: PipelineProps) {
               transition={
                 reduce
                   ? { duration: 0 }
-                  : { type: 'spring', stiffness: 220, damping: 26 }
+                  : { type: 'tween', duration: 0.55, ease: 'easeInOut' }
               }
               style={{ cursor: 'pointer' }}
               onClick={() => onSelect(token.correlationId)}
@@ -174,15 +244,15 @@ export function Pipeline({ tokens, selectedId, now, onSelect }: PipelineProps) {
               >
                 {seqOf.get(token.correlationId)}
               </text>
-              {remaining !== null ? (
+              {elapsed !== null ? (
                 <text
-                  y={-16}
+                  y={-17}
                   textAnchor="middle"
                   fill="var(--text-muted)"
                   fontSize={10}
                   className="mono"
                 >
-                  {remaining}s
+                  ⏱ {elapsed}s
                 </text>
               ) : null}
             </motion.g>

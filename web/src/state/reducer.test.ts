@@ -91,6 +91,42 @@ describe('reducer retry', () => {
     expect(state.tokens.c1.retryTier).toBe('5s');
     expect(state.tokens.c1.retryDeadline).toBe(6000);
   });
+
+  it('keeps the tier when the next attempt re-consumes mid-ladder', () => {
+    const state = run([
+      started,
+      { type: 'envelope', envelope: env('retry', { attempts: 1 }), now: 1000 },
+      // Second attempt starts: consuming/decision are lower-rank than retry and
+      // must not reset the tier back to the 5s box.
+      { type: 'envelope', envelope: env('consuming', { attempts: 0 }), now: 6000 },
+      {
+        type: 'envelope',
+        envelope: env('processing_decision', { attempts: 2 }),
+        now: 6000,
+      },
+    ]);
+    expect(state.tokens.c1.currentStage).toBe('retry');
+    expect(state.tokens.c1.retryTier).toBe('5s');
+    expect(state.tokens.c1.retryDeadline).toBe(6000);
+  });
+
+  it('advances the tier and clears it once the token leaves retry', () => {
+    const state = run([
+      started,
+      { type: 'envelope', envelope: env('retry', { attempts: 1 }), now: 1000 },
+      { type: 'envelope', envelope: env('retry', { attempts: 2 }), now: 6000 },
+    ]);
+    expect(state.tokens.c1.retryTier).toBe('30s');
+    expect(state.tokens.c1.retryDeadline).toBe(36000);
+
+    const done = run(
+      [{ type: 'envelope', envelope: env('processed', { attempts: 3 }), now: 40000 }],
+      state,
+    );
+    expect(done.tokens.c1.currentStage).toBe('processed');
+    expect(done.tokens.c1.retryTier).toBeUndefined();
+    expect(done.tokens.c1.retryDeadline).toBeUndefined();
+  });
 });
 
 describe('reducer reset', () => {
