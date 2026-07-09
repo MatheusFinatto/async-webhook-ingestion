@@ -44,7 +44,6 @@ export function useDemoStore(): DemoStore {
     const specs = scenario.build();
     await Promise.all(
       specs.map(async (spec) => {
-        socketRef.current?.subscribe(spec.correlationId);
         dispatch({
           type: 'trigger_started',
           correlationId: spec.correlationId,

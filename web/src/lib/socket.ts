@@ -6,10 +6,11 @@ import {
   type TelemetryEnvelope,
 } from './telemetry';
 
+// The dashboard is a global view, so it consumes the firehose feed the gateway
+// broadcasts to every client. The gateway ALSO re-emits each envelope on a
+// per-correlation scoped channel; listening to both would deliver, and count,
+// every event twice, so this client deliberately ignores the scoped channel.
 export const FEED_EVENT = 'telemetry';
-export const SCOPED_EVENT = 'telemetry:correlation';
-export const SUBSCRIBE_EVENT = 'subscribe';
-export const UNSUBSCRIBE_EVENT = 'unsubscribe';
 
 export type ConnectionState = 'connecting' | 'connected' | 'disconnected';
 
@@ -20,8 +21,6 @@ export interface TelemetrySocketHandlers {
 }
 
 export interface TelemetrySocket {
-  subscribe: (correlationId: string) => void;
-  unsubscribe: (correlationId: string) => void;
   disconnect: () => void;
 }
 
@@ -50,14 +49,9 @@ export function createTelemetrySocket(
   socket.on('disconnect', () => handlers.onState?.('disconnected'));
   socket.io.on('reconnect_attempt', () => handlers.onState?.('connecting'));
   socket.on(FEED_EVENT, deliver);
-  socket.on(SCOPED_EVENT, deliver);
   handlers.onState?.('connecting');
 
   return {
-    subscribe: (correlationId) =>
-      socket.emit(SUBSCRIBE_EVENT, correlationId),
-    unsubscribe: (correlationId) =>
-      socket.emit(UNSUBSCRIBE_EVENT, correlationId),
     disconnect: () => socket.disconnect(),
   };
 }
