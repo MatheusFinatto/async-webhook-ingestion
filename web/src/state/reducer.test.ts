@@ -52,7 +52,34 @@ describe('reducer counters', () => {
       duplicate: 1,
       retry: 1,
       dead: 1,
+      rejected: 0,
     });
+  });
+
+  it('counts a boundary rejection from the HTTP result, not the worker', () => {
+    const state = run([
+      started,
+      {
+        type: 'http_result',
+        scenario: 'invalid_signature',
+        result: {
+          correlationId: 'c1',
+          eventId: 'e1',
+          eventType: 'order.created',
+          status: 401,
+          ok: false,
+          bodyText: '',
+          body: { error: 'invalid signature' },
+          latencyMs: 4,
+          signed: { timestamp: '', rawBody: '', canonical: '', signature: '' },
+          apiStage: 'rejected',
+          respondedCorrelationId: 'c1',
+        },
+      },
+    ]);
+    expect(state.counters.rejected).toBe(1);
+    expect(state.counters.processed).toBe(0);
+    expect(state.latencies).toHaveLength(0);
   });
 });
 

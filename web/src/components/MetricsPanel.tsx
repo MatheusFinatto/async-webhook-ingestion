@@ -7,6 +7,7 @@ const COUNTER_META: { key: keyof Counters; label: string; color: string }[] = [
   { key: 'duplicate', label: 'duplicate', color: 'var(--color-stage-duplicate)' },
   { key: 'retry', label: 'retry', color: 'var(--color-stage-retry)' },
   { key: 'dead', label: 'dead', color: 'var(--color-stage-dead)' },
+  { key: 'rejected', label: 'rejected', color: 'var(--color-stage-rejected)' },
 ];
 
 function format(value: number | null): string {
@@ -25,35 +26,33 @@ export function MetricsPanel({
 
   return (
     <Panel title="Live counters">
-      <div className="grid grid-cols-4 gap-2">
+      <div className="grid grid-cols-5 gap-1.5">
         {COUNTER_META.map((meta) => (
           <div
             key={meta.key}
-            className="rounded-md border border-border-subtle bg-surface-2 p-2 text-center"
+            className="rounded-md border border-border-subtle bg-surface-2 p-1.5 text-center"
           >
             <motion.div
               key={counters[meta.key]}
               initial={{ scale: 0.7, opacity: 0.4 }}
               animate={{ scale: 1, opacity: 1 }}
-              className="mono text-2xl font-semibold"
+              className="mono text-xl font-semibold"
               style={{ color: meta.color }}
             >
               {counters[meta.key]}
             </motion.div>
-            <div className="text-[11px] text-fg-faint">{meta.label}</div>
+            <div className="text-[10px] text-fg-faint">{meta.label}</div>
           </div>
         ))}
       </div>
-      <div className="mt-3 flex items-center justify-between rounded-md bg-surface-2 px-3 py-2 text-xs">
-        <span className="text-fg-faint">
-          202 latency
-          <span className="ml-1 rounded bg-surface px-1 py-0.5 text-[10px]">
-            client-side
-          </span>
-        </span>
-        <span className="mono">
-          p50 {format(p50)} · p95 {format(p95)} · n {latencies.length}
-        </span>
+      <div className="mt-3 rounded-md bg-surface-2 px-3 py-2 text-xs">
+        <div className="font-medium text-fg-muted">202 latency</div>
+        <div className="text-[10px] text-fg-faint">client-side</div>
+        <div className="mono mt-1.5 flex flex-col gap-0.5 text-fg-muted">
+          <span>· p50 {format(p50)}</span>
+          <span>· p95 {format(p95)}</span>
+          <span>· n {latencies.length}</span>
+        </div>
       </div>
     </Panel>
   );

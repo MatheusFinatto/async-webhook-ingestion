@@ -42,6 +42,9 @@ export interface Counters {
   duplicate: number;
   retry: number;
   dead: number;
+  // Boundary rejections (401/400/503), counted from the HTTP result, not from
+  // worker telemetry, because these never become a queued message.
+  rejected: number;
 }
 
 export interface DemoState {
@@ -54,7 +57,7 @@ export interface DemoState {
 export const initialState: DemoState = {
   tokens: {},
   order: [],
-  counters: { processed: 0, duplicate: 0, retry: 0, dead: 0 },
+  counters: { processed: 0, duplicate: 0, retry: 0, dead: 0, rejected: 0 },
   latencies: [],
 };
 
@@ -176,10 +179,15 @@ export function reducer(state: DemoState, action: Action): DemoState {
         action.result.status === 202
           ? [...state.latencies, action.result.latencyMs]
           : state.latencies;
+      const counters =
+        action.result.status >= 400
+          ? { ...state.counters, rejected: state.counters.rejected + 1 }
+          : state.counters;
       return {
         ...state,
         tokens: { ...state.tokens, [token.correlationId]: token },
         latencies,
+        counters,
       };
     }
     case 'envelope': {

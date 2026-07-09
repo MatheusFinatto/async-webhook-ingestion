@@ -36,6 +36,7 @@ describe('MetricsPanel', () => {
     );
     expect(screen.getByText('dead').previousSibling).toHaveTextContent('1');
     expect(screen.getByText('client-side')).toBeInTheDocument();
-    expect(screen.getByText(/p50/)).toHaveTextContent('n 3');
+    expect(screen.getByText(/p50/)).toBeInTheDocument();
+    expect(screen.getByText(/n 3/)).toBeInTheDocument();
   });
 });
