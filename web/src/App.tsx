@@ -7,7 +7,6 @@ import { ResponsePanel } from './components/ResponsePanel';
 import { ScenarioBar } from './components/ScenarioBar';
 import { SignaturePanel } from './components/SignaturePanel';
 import { TokenDetail } from './components/TokenDetail';
-import { Empty } from './components/ui';
 import type { ScenarioId } from './lib/scenarios';
 import { useTheme } from './lib/useTheme';
 import { useDemoStore } from './state/useDemoStore';
@@ -92,20 +91,17 @@ export default function App() {
 
       <ScenarioBar onRun={handleRun} onReset={handleReset} busy={busy} />
 
+      <Pipeline
+        tokens={tokens}
+        selectedId={selectedId}
+        now={now}
+        onSelect={setSelectedId}
+      />
       {tokens.length === 0 ? (
-        <div className="rounded-lg border border-border-subtle bg-surface">
-          <Empty>
-            No events yet. Fire a scenario above to watch it travel the pipeline.
-          </Empty>
-        </div>
-      ) : (
-        <Pipeline
-          tokens={tokens}
-          selectedId={selectedId}
-          now={now}
-          onSelect={setSelectedId}
-        />
-      )}
+        <p className="text-center text-xs text-fg-faint">
+          No events yet. Fire a scenario above to watch it travel the pipeline.
+        </p>
+      ) : null}
 
       <div className="grid gap-5 lg:grid-cols-3">
         <ResponsePanel token={selected ?? latest} />
