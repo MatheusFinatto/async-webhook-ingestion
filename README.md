@@ -39,6 +39,9 @@ docker compose up         # postgres, rabbitmq, api, worker
 ```
 
 The API listens on `http://localhost:3000`. Migrations run on the API's boot.
+The API **refuses to boot** without a non-empty `WEBHOOK_HMAC_SECRET` and
+`ADMIN_API_KEY`. An empty HMAC secret would be fail-open, since anyone can
+sign with the empty key.
 
 Sending a signed webhook (the signature covers `"${timestamp}.${rawBody}"`):
 
@@ -124,7 +127,7 @@ npm run typecheck && npm run lint && npm run build && npm test
 
 ## Latency
 
-`RNF-01` targets a p99 under 100ms for the ingestion endpoint, measured locally. The
+The ingestion endpoint targets a p99 under 100ms, measured locally. The
 publish-and-confirm design puts the broker's acknowledgement on the response path, so
 the number is real rather than aspirational.
 

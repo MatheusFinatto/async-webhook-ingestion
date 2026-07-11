@@ -37,4 +37,9 @@ describe('AdminKeyGuard', () => {
       guard.canActivate(contextWithHeaders({ 'x-admin-key': secret })),
     ).toBe(true);
   });
+
+  it('refuses to construct without a key', () => {
+    const empty = { get: () => undefined } as unknown as ConfigService;
+    expect(() => new AdminKeyGuard(empty)).toThrow(/ADMIN_API_KEY/);
+  });
 });

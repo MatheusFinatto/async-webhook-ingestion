@@ -21,7 +21,13 @@ export class WebhookSignatureGuard implements CanActivate {
   private readonly toleranceSeconds: number;
 
   constructor(config: ConfigService) {
-    this.secret = config.get<string>('WEBHOOK_HMAC_SECRET') ?? '';
+    const secret = config.get<string>('WEBHOOK_HMAC_SECRET');
+    if (!secret) {
+      // An empty HMAC key still verifies: anyone could sign with "". Refuse
+      // to exist rather than run fail-open.
+      throw new Error('WEBHOOK_HMAC_SECRET must be set to a non-empty value');
+    }
+    this.secret = secret;
     this.toleranceSeconds = Number(
       config.get<string>('WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS') ?? 300,
     );

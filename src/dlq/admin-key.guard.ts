@@ -14,7 +14,11 @@ export class AdminKeyGuard implements CanActivate {
   private readonly secret: string;
 
   constructor(config: ConfigService) {
-    this.secret = config.get<string>('ADMIN_API_KEY') ?? '';
+    const secret = config.get<string>('ADMIN_API_KEY');
+    if (!secret) {
+      throw new Error('ADMIN_API_KEY must be set to a non-empty value');
+    }
+    this.secret = secret;
   }
 
   canActivate(context: ExecutionContext): boolean {

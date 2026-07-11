@@ -79,4 +79,11 @@ describe('WebhookSignatureGuard', () => {
     const ctx = contextFor({ 'x-timestamp': ts, 'x-signature': 'abc' }, body);
     expect(() => guard.canActivate(ctx)).toThrow(UnauthorizedException);
   });
+
+  it('refuses to construct without a secret instead of running fail-open', () => {
+    const empty = { get: () => undefined } as unknown as ConfigService;
+    expect(() => new WebhookSignatureGuard(empty)).toThrow(
+      /WEBHOOK_HMAC_SECRET/,
+    );
+  });
 });
