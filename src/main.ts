@@ -45,7 +45,7 @@ async function bootstrapWorker(): Promise<void> {
   app.useLogger(app.get(JsonLogger));
   app.enableShutdownHooks();
   Logger.log(
-    'Worker role started (idle until the consumer phase)',
+    'Worker role started; consuming the work and dead-letter queues',
     'Bootstrap',
   );
   await new Promise<void>((resolve) => {
@@ -73,4 +73,9 @@ async function bootstrap(): Promise<void> {
   await bootstrapApi();
 }
 
-void bootstrap();
+bootstrap().catch((error: unknown) => {
+  new Logger('Bootstrap').error(
+    error instanceof Error ? error : new Error(String(error)),
+  );
+  process.exit(1);
+});
