@@ -4,6 +4,7 @@ import { APP_PIPE } from '@nestjs/core';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { isDemoMode } from './common/demo-mode';
 import { ObservabilityModule } from './common/observability.module';
+import { validateEnv } from './config/env.validation';
 import { buildDataSourceOptions } from './config/typeorm.config';
 import { ConsumerModule } from './consumer/consumer.module';
 import { DlqModule } from './dlq/dlq.module';
@@ -16,14 +17,20 @@ function resolveRoleModules(): NonNullable<ModuleMetadata['imports']> {
   if (process.env.APP_ROLE === 'worker') {
     return [ConsumerModule];
   }
-  return isDemoMode() ? [TelemetryGatewayModule] : [];
+  const apiModules: NonNullable<ModuleMetadata['imports']> = [
+    EventsModule,
+    HealthModule,
+    WebhooksModule,
+    DlqModule,
+  ];
+  return isDemoMode() ? [...apiModules, TelemetryGatewayModule] : apiModules;
 }
 
 const roleModules = resolveRoleModules();
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
     ObservabilityModule,
     TypeOrmModule.forRootAsync({
       useFactory: () => ({
@@ -31,10 +38,6 @@ const roleModules = resolveRoleModules();
         migrationsRun: process.env.APP_ROLE !== 'worker',
       }),
     }),
-    EventsModule,
-    HealthModule,
-    WebhooksModule,
-    DlqModule,
     ...roleModules,
   ],
   providers: [
