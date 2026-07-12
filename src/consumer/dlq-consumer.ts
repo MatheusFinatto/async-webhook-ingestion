@@ -1,8 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Nack, RabbitSubscribe } from '@golevelup/nestjs-rabbitmq';
 import { ConsumeMessage } from 'amqplib';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource } from 'typeorm';
 import { DlqMessage } from '../events/entities/dlq-message.entity';
 import { Event } from '../events/entities/event.entity';
 import { EventStatus } from '../events/event-status.enum';
@@ -25,12 +24,7 @@ interface DeadLetter {
 export class DlqConsumer {
   private readonly logger = new Logger(DlqConsumer.name);
 
-  constructor(
-    @InjectRepository(DlqMessage)
-    private readonly dlqMessages: Repository<DlqMessage>,
-    @InjectRepository(Event)
-    private readonly events: Repository<Event>,
-  ) {}
+  constructor(private readonly dataSource: DataSource) {}
 
   @RabbitSubscribe({
     exchange: DEAD_LETTER_EXCHANGE,
@@ -56,23 +50,40 @@ export class DlqConsumer {
         ? amqpMessage.properties.correlationId
         : null) ??
       'unknown';
+    const messageId =
+      typeof amqpMessage.properties.messageId === 'string'
+        ? amqpMessage.properties.messageId
+        : eventId;
 
     return runWithCorrelationId(correlationId, async () => {
       try {
-        await this.dlqMessages.insert({
-          messageId:
-            typeof amqpMessage.properties.messageId === 'string'
-              ? amqpMessage.properties.messageId
-              : eventId,
-          correlationId,
-          eventId,
-          reason: typeof dead.reason === 'string' ? dead.reason : 'unknown',
-          attempts: typeof dead.attempts === 'number' ? dead.attempts : 0,
-          payload: typeof dead.payload === 'string' ? dead.payload : raw,
+        // One transaction so a redelivery never leaves a dead letter recorded
+        // without its event marked, or vice versa. The insert ignores a
+        // message_id already persisted (at-least-once redelivery), and the
+        // status update is idempotent.
+        await this.dataSource.transaction(async (manager) => {
+          await manager
+            .createQueryBuilder()
+            .insert()
+            .into(DlqMessage)
+            .values({
+              messageId,
+              correlationId,
+              eventId,
+              reason: typeof dead.reason === 'string' ? dead.reason : 'unknown',
+              attempts: typeof dead.attempts === 'number' ? dead.attempts : 0,
+              payload: typeof dead.payload === 'string' ? dead.payload : raw,
+            })
+            .orIgnore()
+            .execute();
+          if (eventId) {
+            await manager.update(
+              Event,
+              { eventId },
+              { status: EventStatus.Dead },
+            );
+          }
         });
-        if (eventId) {
-          await this.events.update({ eventId }, { status: EventStatus.Dead });
-        }
         this.logger.warn({
           message: 'persisted dead letter',
           event_id: eventId,
