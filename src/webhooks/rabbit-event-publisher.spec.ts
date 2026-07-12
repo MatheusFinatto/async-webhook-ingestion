@@ -1,9 +1,13 @@
 import { ConfigService } from '@nestjs/config';
 import { AmqpConnection } from '@golevelup/nestjs-rabbitmq';
-import { RabbitEventPublisher } from './rabbit-event-publisher';
+import {
+  PUBLISH_TOKEN_HEADER,
+  RabbitEventPublisher,
+} from './rabbit-event-publisher';
 import { OrderWebhookDto } from './dto/order-webhook.dto';
 
 const UNROUTABLE = 'corr-unroutable';
+const FOREIGN_RETURN = 'corr-foreign-return';
 
 const event: OrderWebhookDto = {
   event_id: 'evt-1',
@@ -47,7 +51,21 @@ function fakeAmqp(): { amqp: AmqpConnection; publishes: Publish[] } {
     ) => {
       publishes.push({ exchange, routingKey, options });
       if (options.correlationId === UNROUTABLE) {
-        onReturn?.({ properties: { correlationId: UNROUTABLE } });
+        // The broker echoes the published message back on basic.return,
+        // headers included.
+        onReturn?.({ properties: { headers: options.headers } });
+      }
+      if (options.correlationId === FOREIGN_RETURN) {
+        // A return for some other in-flight publish that happens to share
+        // the caller-supplied correlation id.
+        onReturn?.({
+          properties: {
+            headers: {
+              ...(options.headers as Record<string, unknown>),
+              [PUBLISH_TOKEN_HEADER]: 'someone-elses-token',
+            },
+          },
+        });
       }
       return Promise.resolve(true);
     },
@@ -68,6 +86,8 @@ describe('RabbitEventPublisher', () => {
       messageId: 'evt-1',
       correlationId: 'corr-ok',
     });
+    const headers = publishes[0].options.headers as Record<string, unknown>;
+    expect(typeof headers[PUBLISH_TOKEN_HEADER]).toBe('string');
   });
 
   it('rejects when the broker returns the message as unroutable', async () => {
@@ -78,5 +98,15 @@ describe('RabbitEventPublisher', () => {
     await expect(publisher.publish(event, UNROUTABLE)).rejects.toThrow(
       /unroutable/,
     );
+  });
+
+  it('ignores a return that belongs to a different publish with the same correlation id', async () => {
+    const { amqp } = fakeAmqp();
+    const publisher = new RabbitEventPublisher(amqp, config());
+    await publisher.onApplicationBootstrap();
+
+    await expect(
+      publisher.publish(event, FOREIGN_RETURN),
+    ).resolves.toBeUndefined();
   });
 });

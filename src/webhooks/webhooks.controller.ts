@@ -3,6 +3,7 @@ import {
   Controller,
   HttpCode,
   HttpStatus,
+  Logger,
   Post,
   ServiceUnavailableException,
   UseGuards,
@@ -15,6 +16,8 @@ import { WebhookSignatureGuard } from './webhook-signature.guard';
 
 @Controller('webhooks')
 export class WebhooksController {
+  private readonly logger = new Logger(WebhooksController.name);
+
   constructor(private readonly publisher: EventPublisher) {}
 
   @Post('orders')
@@ -26,7 +29,15 @@ export class WebhooksController {
     const correlationId = currentCorrelationId() ?? randomUUID();
     try {
       await this.publisher.publish(event, correlationId);
-    } catch {
+    } catch (error) {
+      this.logger.error(
+        {
+          message: 'publish failed, returning 503',
+          event_id: event.event_id,
+          correlation_id: correlationId,
+        },
+        error instanceof Error ? error : new Error(String(error)),
+      );
       throw new ServiceUnavailableException('event could not be accepted');
     }
     return { correlation_id: correlationId, status: 'accepted' };

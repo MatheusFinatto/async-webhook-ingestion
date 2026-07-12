@@ -2,12 +2,18 @@ import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AmqpConnection } from '@golevelup/nestjs-rabbitmq';
 import { ConfirmChannel, ConsumeMessage } from 'amqplib';
+import { randomUUID } from 'node:crypto';
 import { EventPublisher } from './event-publisher';
 import { OrderWebhookDto } from './dto/order-webhook.dto';
 import {
   ORDER_RECEIVED_ROUTING_KEY,
   WEBHOOK_EXCHANGE,
 } from '../messaging/messaging.constants';
+
+// Correlates a basic.return with the publish that caused it. The correlation
+// id cannot play this role: it is caller-supplied and two in-flight publishes
+// may share it, which would attribute a return to the wrong one.
+export const PUBLISH_TOKEN_HEADER = 'x-publish-token';
 
 @Injectable()
 export class RabbitEventPublisher
@@ -31,9 +37,9 @@ export class RabbitEventPublisher
   async onApplicationBootstrap(): Promise<void> {
     await this.amqp.managedChannel.addSetup((channel: ConfirmChannel) => {
       channel.on('return', (message: ConsumeMessage) => {
-        const correlationId = message.properties.correlationId;
-        if (typeof correlationId === 'string') {
-          this.pendingReturns.get(correlationId)?.();
+        const token = message.properties.headers?.[PUBLISH_TOKEN_HEADER];
+        if (typeof token === 'string') {
+          this.pendingReturns.get(token)?.();
         }
       });
     });
@@ -46,8 +52,9 @@ export class RabbitEventPublisher
       payload: event.payload,
       correlation_id: correlationId,
     };
+    const publishToken = randomUUID();
     let returned = false;
-    this.pendingReturns.set(correlationId, () => {
+    this.pendingReturns.set(publishToken, () => {
       returned = true;
     });
     try {
@@ -61,12 +68,15 @@ export class RabbitEventPublisher
           messageId: event.event_id,
           correlationId,
           contentType: 'application/json',
-          headers: { 'x-correlation-id': correlationId },
+          headers: {
+            'x-correlation-id': correlationId,
+            [PUBLISH_TOKEN_HEADER]: publishToken,
+          },
         },
       );
       await this.withTimeout(confirm);
     } finally {
-      this.pendingReturns.delete(correlationId);
+      this.pendingReturns.delete(publishToken);
     }
     if (returned) {
       throw new Error('message returned as unroutable');
