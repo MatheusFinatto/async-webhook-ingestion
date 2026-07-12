@@ -20,6 +20,7 @@ import {
 import { EventStatus } from '../events/event-status.enum';
 import { TelemetryEmitter } from '../telemetry/telemetry-emitter';
 import { IdempotentEventProcessor } from './idempotent-event-processor';
+import { isNonRecoverableDbError } from './processing-errors';
 
 interface OrderMessage {
   event_id?: unknown;
@@ -130,10 +131,44 @@ export class OrderConsumer {
     try {
       decision = await this.processor.process(event, { isContinuation });
     } catch (error) {
+      if (isNonRecoverableDbError(error)) {
+        // Deterministic database rejection (e.g. a value the schema cannot
+        // hold): requeueing would redeliver into the same error forever.
+        const reason = error instanceof Error ? error.message : String(error);
+        this.logger.warn({
+          message:
+            'dead-lettering event after a non-recoverable database error',
+          event_id: event.eventId,
+          correlation_id: correlationId,
+          reason,
+        });
+        await this.toDeadLetter({
+          eventId: event.eventId,
+          correlationId,
+          reason,
+          attempts: 0,
+          payload: raw,
+        });
+        this.telemetry.emit({
+          stage: 'dead',
+          correlationId,
+          eventId: event.eventId,
+          eventType: event.eventType,
+          status: EventStatus.Dead,
+          attempts: 0,
+        });
+        return;
+      }
       this.logger.error(
         `processing failed for event ${event.eventId}`,
         error as Error,
       );
+      // Unclassified failure, most often a transient dependency (Postgres or
+      // the broker unreachable). Requeue rather than dead-letter: the attempt
+      // counter lives in Postgres, so an outage there must not burn a retry
+      // tier. The cost is a hot redelivery loop while the dependency is down.
+      // Prefetch caps its rate, and the permanent/poison branches above keep
+      // genuinely bad payloads out of it.
       return new Nack(true);
     }
 

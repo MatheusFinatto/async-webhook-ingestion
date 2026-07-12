@@ -1,5 +1,6 @@
 import { ConsumeMessage } from 'amqplib';
-import { AmqpConnection } from '@golevelup/nestjs-rabbitmq';
+import { AmqpConnection, Nack } from '@golevelup/nestjs-rabbitmq';
+import { QueryFailedError } from 'typeorm';
 import {
   ATTEMPT_HEADER,
   DEAD_LETTER_EXCHANGE,
@@ -89,6 +90,20 @@ describe('OrderConsumer', () => {
     );
   });
 
+  it('reaches the last (2m) tier on the third failed attempt', async () => {
+    decide({ kind: 'retry', attempts: 3 });
+    await consumer.handle(validBody, message(validBody));
+
+    expect(amqp.publish).toHaveBeenCalledWith(
+      RETRY_EXCHANGE,
+      RETRY_TIERS[2].routingKey,
+      expect.anything(),
+      expect.objectContaining({
+        headers: expect.objectContaining({ [ATTEMPT_HEADER]: 3 }),
+      }),
+    );
+  });
+
   it('routes an exhausted/permanent failure to the dead-letter exchange', async () => {
     decide({ kind: 'dead', attempts: 3, reason: 'poison' });
     await consumer.handle(validBody, message(validBody));
@@ -138,6 +153,32 @@ describe('OrderConsumer', () => {
 
     expect(telemetry.emit).toHaveBeenCalledWith(
       expect.objectContaining({ stage: 'dead', eventId: 'evt-1', attempts: 3 }),
+    );
+  });
+
+  it('requeues when the processor fails with an unclassified error', async () => {
+    processor.process.mockRejectedValue(new Error('connection reset'));
+    const result = await consumer.handle(validBody, message(validBody));
+
+    expect(result).toBeInstanceOf(Nack);
+    expect(amqp.publish).not.toHaveBeenCalled();
+  });
+
+  it('dead-letters instead of requeueing on a non-recoverable database error', async () => {
+    const driverError = Object.assign(new Error('value too long'), {
+      code: '22001',
+    });
+    processor.process.mockRejectedValue(
+      new QueryFailedError('INSERT INTO events', [], driverError),
+    );
+    const result = await consumer.handle(validBody, message(validBody));
+
+    expect(result).toBeUndefined();
+    expect(amqp.publish).toHaveBeenCalledWith(
+      DEAD_LETTER_EXCHANGE,
+      DEAD_LETTER_ROUTING_KEY,
+      expect.objectContaining({ event_id: 'evt-1' }),
+      expect.anything(),
     );
   });
 
