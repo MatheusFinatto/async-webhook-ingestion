@@ -17,12 +17,14 @@ export interface ProcessContext {
   isContinuation: boolean;
 }
 
-function isTerminal(status: EventStatus): boolean {
-  return (
-    status === EventStatus.Processed ||
-    status === EventStatus.Failed ||
-    status === EventStatus.Dead
-  );
+// Processed and Dead are settled: the outcome is recorded and, for Dead, the
+// dead letter is persisted. Failed is NOT settled, it means "decided dead,
+// but the dead-letter publish may not have completed" (the DLQ consumer is
+// what flips it to Dead). A redelivery of a Failed event must re-emit the
+// dead decision so that publish converges instead of being dropped as a
+// duplicate.
+function isSettled(status: EventStatus): boolean {
+  return status === EventStatus.Processed || status === EventStatus.Dead;
 }
 
 @Injectable()
@@ -35,8 +37,10 @@ export class IdempotentEventProcessor {
     private readonly telemetry: TelemetryEmitter,
     config: ConfigService,
   ) {
+    // 4 attempts = the first pass plus one retry per tier, so a transient
+    // failure walks the whole 5s/30s/2m ladder before dead-lettering.
     this.maxAttempts = Number(
-      config.get<string>('MAX_PROCESSING_ATTEMPTS') ?? 3,
+      config.get<string>('MAX_PROCESSING_ATTEMPTS') ?? 4,
     );
   }
 
@@ -99,7 +103,7 @@ export class IdempotentEventProcessor {
         throw new Error(`event row missing after claim: ${event.eventId}`);
       }
 
-      if (isTerminal(row.status)) {
+      if (isSettled(row.status)) {
         await manager.increment(
           Event,
           { eventId: event.eventId },
@@ -107,6 +111,14 @@ export class IdempotentEventProcessor {
           1,
         );
         return { kind: 'duplicate', attempts: row.attempts };
+      }
+
+      if (row.status === EventStatus.Failed) {
+        return {
+          kind: 'dead',
+          attempts: row.attempts,
+          reason: row.failureReason ?? 'previously failed',
+        };
       }
 
       if (!claimed && !context.isContinuation) {
