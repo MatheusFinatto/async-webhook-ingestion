@@ -2,6 +2,8 @@ process.env.TESTCONTAINERS_RYUK_DISABLED = 'true';
 process.env.APP_ROLE = 'api';
 process.env.DEMO_MODE = 'true';
 process.env.WEB_ORIGIN = 'http://localhost:5173';
+process.env.WEBHOOK_HMAC_SECRET = 'telemetry-e2e-secret';
+process.env.ADMIN_API_KEY = 'telemetry-e2e-admin-key';
 
 import { INestApplication } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';

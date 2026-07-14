@@ -151,6 +151,31 @@ describe('Retry + DLQ (e2e)', () => {
     expect(row.status).toBe(EventStatus.Dead);
   });
 
+  it('dead-letters a transient failure once attempts are exhausted', async () => {
+    handler.transientFails.set('evt-exhaust-1', 99);
+    await publish(
+      {
+        event_id: 'evt-exhaust-1',
+        event_type: 'order.created',
+        payload: { amount: 1 },
+        correlation_id: 'corr-exhaust-1',
+      },
+      'corr-exhaust-1',
+    );
+
+    // 3 attempts with 5s + 30s retry tiers in between: give it plenty.
+    const dead = await waitFor(
+      async () => dlq.findOneBy({ eventId: 'evt-exhaust-1' }),
+      120_000,
+    );
+    expect(dead.reason).toBe('flaky');
+    expect(dead.attempts).toBe(3);
+
+    const row = await events.findOneByOrFail({ eventId: 'evt-exhaust-1' });
+    expect(row.status).toBe(EventStatus.Dead);
+    expect(row.attempts).toBe(3);
+  });
+
   it('dead-letters a payload with no event_id, keyed by correlation_id', async () => {
     await publish(
       { event_type: 'order.created', payload: { amount: 1 } },
@@ -161,5 +186,38 @@ describe('Retry + DLQ (e2e)', () => {
       dlq.findOneBy({ correlationId: 'corr-noid-1' }),
     );
     expect(dead.eventId).toBeNull();
+  });
+
+  it('recovers an event stuck in failed by re-emitting its dead letter', async () => {
+    // "failed" without a dlq_messages row models a crash between the state
+    // commit and the DLX publish; a redelivery must finish the job.
+    await events.insert({
+      eventId: 'evt-stuck-1',
+      eventType: 'order.created',
+      correlationId: 'corr-stuck-1',
+      payload: { amount: 1 },
+      status: EventStatus.Failed,
+      attempts: 3,
+      failureReason: 'dlx publish lost',
+    });
+
+    await publish(
+      {
+        event_id: 'evt-stuck-1',
+        event_type: 'order.created',
+        payload: { amount: 1 },
+        correlation_id: 'corr-stuck-1',
+      },
+      'corr-stuck-1',
+    );
+
+    const dead = await waitFor(async () =>
+      dlq.findOneBy({ eventId: 'evt-stuck-1' }),
+    );
+    expect(dead.reason).toBe('dlx publish lost');
+
+    const row = await events.findOneByOrFail({ eventId: 'evt-stuck-1' });
+    expect(row.status).toBe(EventStatus.Dead);
+    expect(row.attempts).toBe(3);
   });
 });

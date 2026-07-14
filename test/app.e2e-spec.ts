@@ -1,4 +1,9 @@
 process.env.TESTCONTAINERS_RYUK_DISABLED = 'true';
+// Config is validated and snapshotted when AppModule is imported, so anything
+// the ConfigService must see has to be in process.env before the imports run.
+process.env.WEBHOOK_HMAC_SECRET = 'e2e-secret';
+process.env.ADMIN_API_KEY = 'e2e-admin-key';
+process.env.WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS = '300';
 
 import { INestApplication } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
@@ -80,9 +85,6 @@ describe('App (e2e)', () => {
       .withWaitStrategy(Wait.forLogMessage(/Server startup complete/))
       .start();
     process.env.RABBITMQ_URL = `amqp://guest:guest@${rabbit.getHost()}:${rabbit.getMappedPort(5672)}`;
-    process.env.WEBHOOK_HMAC_SECRET = HMAC_SECRET;
-    process.env.WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS = '300';
-    process.env.ADMIN_API_KEY = ADMIN_KEY;
 
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
@@ -102,11 +104,14 @@ describe('App (e2e)', () => {
     await container?.stop();
   });
 
-  it('GET /health returns ok', () => {
-    return request(app.getHttpServer())
+  it('GET /health returns ok with dependency checks', async () => {
+    const response = await request(app.getHttpServer())
       .get('/health')
-      .expect(200)
-      .expect({ status: 'ok' });
+      .expect(200);
+    expect(response.body).toEqual({
+      status: 'ok',
+      checks: { postgres: 'up', rabbitmq: 'up' },
+    });
   });
 
   it('applies migrations: events and dlq_messages tables exist', async () => {
@@ -279,6 +284,23 @@ describe('App (e2e)', () => {
 
   it('rejects a malformed payload with 400', async () => {
     const body = JSON.stringify({ event_id: 'evt-e2e-3' });
+    const ts = String(Math.floor(Date.now() / 1000));
+
+    await request(app.getHttpServer())
+      .post('/webhooks/orders')
+      .set('content-type', 'application/json')
+      .set('x-timestamp', ts)
+      .set('x-signature', sign(ts, body))
+      .send(body)
+      .expect(400);
+  });
+
+  it('rejects an event_id longer than the storage column with 400', async () => {
+    const body = JSON.stringify({
+      event_id: 'e'.repeat(300),
+      event_type: 'order.created',
+      payload: { amount: 1 },
+    });
     const ts = String(Math.floor(Date.now() / 1000));
 
     await request(app.getHttpServer())
