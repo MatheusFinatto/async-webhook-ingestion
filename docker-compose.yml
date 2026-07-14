@@ -6,7 +6,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-webhook}
       POSTGRES_DB: ${POSTGRES_DB:-webhook_ingestion}
     ports:
-      - '${POSTGRES_PORT:-5432}:5432'
+      # Loopback only: published for local tooling (psql, the bench), not for the network.
+      - '127.0.0.1:${POSTGRES_PORT:-5432}:5432'
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -21,8 +22,9 @@ services:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
     ports:
-      - '${RABBITMQ_PORT:-5672}:5672'
-      - '15672:15672'
+      # Loopback only: AMQP for local tooling, management UI for a human at the keyboard.
+      - '127.0.0.1:${RABBITMQ_PORT:-5672}:5672'
+      - '127.0.0.1:15672:15672'
     healthcheck:
       test: ['CMD', 'rabbitmq-diagnostics', '-q', 'ping']
       interval: 10s
@@ -67,7 +69,7 @@ services:
 
   worker:
     # Same build + image tag as api, so compose builds the image once and both services
-    # reuse it; the role is chosen at runtime via APP_ROLE (D-008).
+    # reuse it; the role is chosen at runtime via APP_ROLE.
     build: .
     image: async-webhook-ingestion:local
     environment:

@@ -14,5 +14,7 @@ ENV NODE_ENV=production
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY package*.json ./
-# Role (api | worker) is selected at runtime via APP_ROLE; both share this image (D-008).
+# The app only reads from disk and writes to stdout; no reason to stay root.
+USER node
+# Role (api | worker) is selected at runtime via APP_ROLE; both share this image.
 CMD ["node", "dist/main.js"]
