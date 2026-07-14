@@ -14,5 +14,8 @@ export function buildDataSourceOptions(): DataSourceOptions {
     entities: [Event, DlqMessage],
     migrations: [join(__dirname, '..', 'database', 'migrations', '*.{ts,js}')],
     synchronize: false,
+    // Sized against RABBITMQ_PREFETCH: the worker holds one connection per
+    // in-flight message, and the pool must cover them all plus the health ping.
+    extra: { max: Number(process.env.POSTGRES_POOL_SIZE ?? 10) },
   };
 }

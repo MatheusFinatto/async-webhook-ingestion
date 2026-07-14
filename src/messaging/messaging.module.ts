@@ -79,6 +79,9 @@ function buildAmqpUri(config: ConfigService): string {
           },
         ],
         defaultPublishOptions: { persistent: true },
+        // Each in-flight message holds one DB connection for its whole
+        // transaction, so this must not exceed POSTGRES_POOL_SIZE.
+        prefetchCount: Number(config.get<string>('RABBITMQ_PREFETCH') ?? 10),
         connectionInitOptions: { wait: true, reject: true, timeout: 10_000 },
       }),
       inject: [ConfigService],
