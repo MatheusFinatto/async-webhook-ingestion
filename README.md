@@ -5,6 +5,10 @@ The HTTP endpoint verifies the signature, publishes the event to RabbitMQ, and r
 `202` right away. A separate worker does the actual processing, so a slow downstream
 never blocks a partner's request.
 
+The design decisions behind this project (why RabbitMQ over BullMQ, why PostgreSQL as
+the idempotency store, the publish-and-confirm trade-off, and so on) are explained in
+detail on [my portfolio](https://matheusfinatto.vercel.app).
+
 ## What it does
 
 - **Signed ingestion.** Verifies an HMAC-SHA256 signature over the raw body, with a
@@ -18,9 +22,20 @@ never blocks a partner's request.
 - **Retry and dead-lettering.** Transient failures are retried with a staged backoff
   (5s / 30s / 2min) via TTL-and-dead-letter queues; exhausted or poison messages land in
   a durable dead-letter queue.
-- **DLQ inspection.** `GET /dlq`, behind an admin key, lists dead-lettered messages.
+- **DLQ inspection and replay.** `GET /dlq`, behind an admin key, lists dead-lettered
+  messages. `POST /dlq/:id/replay` redrives one: it resets the event state, republishes
+  the original message and restarts the retry budget, keeping the dead-letter row as an
+  audit record with a `replayed_at` stamp.
+- **Rate limiting.** A per-IP limit on the ingestion endpoint, counted before the HMAC
+  check, so a flood of garbage cannot burn CPU on signature verification.
 - **End-to-end tracing.** A `correlation_id` is propagated from the HTTP request through
   the AMQP message to the worker and into the persisted row, on structured JSON logs.
+- **Prometheus metrics.** The API serves `GET /metrics` (HTTP series by route and
+  status); the worker exposes its own registry (processing outcomes, durations, dead
+  letters) on a dedicated port.
+- **OpenAPI docs.** Swagger UI at `/docs`. Note that "Try it out" on the ingestion
+  endpoint returns `401` by design: it cannot compute the HMAC signature. Use the signed
+  `curl` below or `bench/latency-smoke.mjs` as a reference client.
 - **Durable topology.** Exchanges and queues are declared and asserted on boot by both
   the API and the worker; messages are persistent so they survive a broker restart.
 
@@ -33,12 +48,20 @@ via `APP_ROLE`.
 
 ## Running
 
+Requires Docker with the Compose plugin; nothing else needs to be installed for a
+containerized run.
+
 ```bash
 cp .env.example .env      # set WEBHOOK_HMAC_SECRET and ADMIN_API_KEY to real values
 docker compose up         # postgres, rabbitmq, api, worker
 ```
 
-The API listens on `http://localhost:3000`. Migrations run on the API's boot.
+Every setting in `.env.example` is documented inline and carries a sane default, so
+editing the two secrets is enough to start.
+
+The API listens on `http://localhost:3000`, with Swagger UI at
+`http://localhost:3000/docs`. Migrations run on the API's boot. The worker's metrics
+are published on `http://127.0.0.1:9091/metrics`.
 The API **refuses to boot** without a non-empty `WEBHOOK_HMAC_SECRET` and
 `ADMIN_API_KEY`. An empty HMAC secret would be fail-open, since anyone can
 sign with the empty key.
@@ -58,11 +81,16 @@ curl -i -X POST http://localhost:3000/webhooks/orders \
   --data "$BODY"
 ```
 
-Inspecting the dead-letter queue:
+Inspecting the dead-letter queue and replaying an entry after the downstream is fixed:
 
 ```bash
 curl -H "x-admin-key: $ADMIN_API_KEY" http://localhost:3000/dlq
+curl -X POST -H "x-admin-key: $ADMIN_API_KEY" http://localhost:3000/dlq/<id>/replay
 ```
+
+A replay is refused with `409` when it cannot succeed or would double-process: a dead
+letter whose payload never parsed would only die again, and an event that is already
+`processed` must not run twice.
 
 ## Live demo
 
@@ -144,14 +172,14 @@ Docker, on Node.js 22:
 Absolute numbers depend on the machine; reproduce with:
 
 ```bash
-WEBHOOK_HMAC_SECRET="your-secret" node bench/latency-smoke.mjs
+WEBHOOK_HMAC_SECRET="your-secret" RATE_LIMIT_MAX=10000 node bench/latency-smoke.mjs
 ```
+
+`RATE_LIMIT_MAX` must be raised on the API process for the run: the smoke test fires
+2000 requests from one IP, far past the production default.
 
 ## Architecture decisions
 
-The design decisions are written up as ADRs in [`docs/adr/`](./docs/adr):
-
-1. [RabbitMQ over BullMQ](./docs/adr/0001-rabbitmq-over-bullmq.md)
-2. [NestJS over Express](./docs/adr/0002-nestjs-over-express.md)
-3. [PostgreSQL as the idempotency store](./docs/adr/0003-postgres-for-idempotency.md)
-4. [HMAC-SHA256 with a timing-safe comparison](./docs/adr/0004-hmac-signature-validation.md)
+The reasoning behind the stack and the reliability semantics (broker choice, idempotency
+store, publish-and-confirm versus latency, retry topology) is written up in depth on
+[my portfolio](https://matheusfinatto.vercel.app).
