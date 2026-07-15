@@ -8,6 +8,7 @@ import {
   ServiceUnavailableException,
   UseGuards,
 } from '@nestjs/common';
+import { ThrottlerGuard } from '@nestjs/throttler';
 import { randomUUID } from 'node:crypto';
 import { currentCorrelationId } from '../common/correlation-context';
 import { EventPublisher } from './event-publisher';
@@ -20,9 +21,11 @@ export class WebhooksController {
 
   constructor(private readonly publisher: EventPublisher) {}
 
+  // The throttler runs before the signature guard: a flood of garbage must
+  // hit the cheap counter, not burn an HMAC per request.
   @Post('orders')
   @HttpCode(HttpStatus.ACCEPTED)
-  @UseGuards(WebhookSignatureGuard)
+  @UseGuards(ThrottlerGuard, WebhookSignatureGuard)
   async ingestOrder(
     @Body() event: OrderWebhookDto,
   ): Promise<{ correlation_id: string; status: string }> {

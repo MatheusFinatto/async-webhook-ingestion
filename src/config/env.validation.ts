@@ -13,6 +13,8 @@ const POSITIVE_INT_VARS = [
   'MAX_PROCESSING_ATTEMPTS',
   'RABBITMQ_PREFETCH',
   'POSTGRES_POOL_SIZE',
+  'RATE_LIMIT_TTL_SECONDS',
+  'RATE_LIMIT_MAX',
 ] as const;
 
 // Secrets the HTTP boundary compares against. An empty HMAC secret is
