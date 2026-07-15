@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import {
   assertDemoModeAllowed,
@@ -34,6 +35,28 @@ async function bootstrapApi(): Promise<void> {
       exposedHeaders: ['x-correlation-id'],
     });
   }
+  const docsConfig = new DocumentBuilder()
+    .setTitle('Async webhook ingestion')
+    .setDescription(
+      'Signed webhook intake with asynchronous processing. ' +
+        'POST /webhooks/orders is HMAC-authenticated: the x-signature header must ' +
+        'carry a hex HMAC-SHA256 of "timestamp.rawBody" using the shared secret, ' +
+        'with the unix timestamp in x-timestamp. "Try it out" therefore returns ' +
+        '401 unless the signature is computed by a real client; see the signed ' +
+        'curl example in the README or bench/latency-smoke.mjs. ' +
+        'DLQ endpoints require the x-admin-key header.',
+    )
+    .setVersion('0.1.0')
+    .addApiKey(
+      { type: 'apiKey', name: 'x-admin-key', in: 'header' },
+      'admin-key',
+    )
+    .build();
+  SwaggerModule.setup(
+    'docs',
+    app,
+    SwaggerModule.createDocument(app, docsConfig),
+  );
   app.enableShutdownHooks();
   const port = Number(process.env.PORT ?? 3000);
   await app.listen(port);

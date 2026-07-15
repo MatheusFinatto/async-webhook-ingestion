@@ -1,4 +1,5 @@
 import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
+import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { AmqpConnection } from '@golevelup/nestjs-rabbitmq';
 import { DataSource } from 'typeorm';
 
@@ -11,6 +12,7 @@ export interface HealthReport {
   checks: { postgres: CheckState; rabbitmq: CheckState };
 }
 
+@ApiTags('health')
 @Controller('health')
 export class HealthController {
   constructor(
@@ -19,6 +21,9 @@ export class HealthController {
   ) {}
 
   @Get()
+  @ApiOperation({ summary: 'Probe Postgres and RabbitMQ connectivity' })
+  @ApiResponse({ status: 200, description: 'Both dependencies are up' })
+  @ApiResponse({ status: 503, description: 'At least one dependency is down' })
   async check(): Promise<HealthReport> {
     const checks = {
       postgres: await this.postgresState(),
