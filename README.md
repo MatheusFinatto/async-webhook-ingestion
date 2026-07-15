@@ -32,7 +32,8 @@ detail on [my portfolio](https://matheusfinatto.vercel.app).
   the AMQP message to the worker and into the persisted row, on structured JSON logs.
 - **Prometheus metrics.** The API serves `GET /metrics` (HTTP series by route and
   status); the worker exposes its own registry (processing outcomes, durations, dead
-  letters) on a dedicated port.
+  letters) on a dedicated port. The demo overlay bundles Prometheus and Grafana to scrape
+  and chart them (see [Metrics dashboard](#metrics-dashboard)).
 - **OpenAPI docs.** Swagger UI at `/docs`. Note that "Try it out" on the ingestion
   endpoint returns `401` by design: it cannot compute the HMAC signature. Use the signed
   `curl` below or `bench/latency-smoke.mjs` as a reference client.
@@ -125,6 +126,25 @@ secret is ever exposed to the browser.
 The seven scenario buttons cover the happy path, an invalid signature, a stale timestamp,
 a duplicate `event_id`, a transient failure that climbs the retry ladder, a permanent
 failure that dead-letters, and a malformed body rejected at the validation pipe.
+
+### Metrics dashboard
+
+The `/metrics` endpoints are a plain Prometheus exposition format; on their own they are
+just text. The demo overlay runs a Prometheus that scrapes both the API and the worker
+and a Grafana that charts the result, so the counters and histograms are readable at a
+glance. Both are demo-only and stay out of the base `docker-compose.yml`; a production
+deployment exposes the same endpoints for whatever scraper you already run.
+
+They come up with the demo stack. Grafana is on `http://localhost:3001` (login is
+disabled on this local instance) with the "Webhook Ingestion" dashboard provisioned on
+first boot; Prometheus is on `http://localhost:9090`. Set `GRAFANA_PORT` if `3001` is
+already taken. Drive traffic from the scenario buttons and the worker panels fill in.
+
+![Grafana dashboard for the ingestion pipeline](docs/grafana-dashboard.png)
+
+The panels read the same series the pipeline emits: events processed by outcome, the
+running dead-letter count, HTTP requests by status, and both the processing and API
+latency quantiles.
 
 ### Seeing a real 503
 

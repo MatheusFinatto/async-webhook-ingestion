@@ -1,0 +1,18 @@
+global:
+  scrape_interval: 5s
+  scrape_timeout: 4s
+
+scrape_configs:
+  # The api and worker each own a private registry and expose it on their own
+  # port; Prometheus aggregates the two. See src/metrics/metrics.service.ts.
+  - job_name: api
+    static_configs:
+      - targets: ['api:3000']
+        labels:
+          role: api
+
+  - job_name: worker
+    static_configs:
+      - targets: ['worker:9091']
+        labels:
+          role: worker

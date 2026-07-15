@@ -32,3 +32,36 @@ services:
       - '127.0.0.1:${WEB_PORT:-5173}:80'
     depends_on:
       - api
+
+  # Demo-only observability: scrapes the api and worker /metrics endpoints that
+  # exist in every deployment, and renders them so the numbers aren't just a raw
+  # exposition format. Kept out of docker-compose.yml so production stays lean.
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    volumes:
+      - ./ops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=6h'
+    ports:
+      - '127.0.0.1:${PROMETHEUS_PORT:-9090}:9090'
+    depends_on:
+      - api
+      - worker
+
+  grafana:
+    image: grafana/grafana:11.3.1
+    environment:
+      # Loopback-only demo instance: skip the login wall so the dashboard is one
+      # click from the compose command. Not a production auth posture.
+      GF_AUTH_ANONYMOUS_ENABLED: 'true'
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: 'true'
+      GF_USERS_DEFAULT_THEME: dark
+    volumes:
+      - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./ops/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - '127.0.0.1:${GRAFANA_PORT:-3001}:3000'
+    depends_on:
+      - prometheus
