@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { AmqpConnection } from '@golevelup/nestjs-rabbitmq';
 import { ConfirmChannel, ConsumeMessage } from 'amqplib';
 import { randomUUID } from 'node:crypto';
+import { withTimeout } from '../common/with-timeout';
 import { EventPublisher } from './event-publisher';
 import { OrderWebhookDto } from './dto/order-webhook.dto';
 import {
@@ -74,7 +75,11 @@ export class RabbitEventPublisher
           },
         },
       );
-      await this.withTimeout(confirm);
+      await withTimeout(
+        confirm,
+        this.confirmTimeoutMs,
+        'publisher confirm timed out',
+      );
     } finally {
       this.pendingReturns.delete(publishToken);
     }
@@ -85,24 +90,6 @@ export class RabbitEventPublisher
       message: 'published, awaiting consumption',
       event_id: event.event_id,
       correlation_id: correlationId,
-    });
-  }
-
-  private withTimeout(confirm: Promise<boolean>): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        reject(new Error('publisher confirm timed out'));
-      }, this.confirmTimeoutMs);
-      confirm.then(
-        () => {
-          clearTimeout(timer);
-          resolve();
-        },
-        (error: unknown) => {
-          clearTimeout(timer);
-          reject(error instanceof Error ? error : new Error(String(error)));
-        },
-      );
     });
   }
 }

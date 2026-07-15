@@ -35,4 +35,10 @@ export class DlqMessage {
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
+
+  // Records the last redrive. The row is kept (not deleted) so the audit
+  // trail survives a replay that dies again: the re-insert is ignored by the
+  // unique message_id, and this row stays the single record of the event.
+  @Column({ name: 'replayed_at', type: 'timestamptz', nullable: true })
+  replayedAt!: Date | null;
 }
