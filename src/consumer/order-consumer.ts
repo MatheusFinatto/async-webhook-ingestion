@@ -18,6 +18,7 @@ import {
   retryTierForAttempt,
 } from '../messaging/messaging.constants';
 import { EventStatus } from '../events/event-status.enum';
+import { MetricsService } from '../metrics/metrics.service';
 import { TelemetryEmitter } from '../telemetry/telemetry-emitter';
 import { IdempotentEventProcessor } from './idempotent-event-processor';
 import { isNonRecoverableDbError } from './processing-errors';
@@ -45,6 +46,7 @@ export class OrderConsumer {
     private readonly processor: IdempotentEventProcessor,
     private readonly amqp: AmqpConnection,
     private readonly telemetry: TelemetryEmitter,
+    private readonly metrics: MetricsService,
   ) {}
 
   @RabbitSubscribe({
@@ -95,6 +97,7 @@ export class OrderConsumer {
         status: EventStatus.Dead,
         attempts: 0,
       });
+      this.metrics.eventsProcessed.inc({ outcome: 'unparseable' });
       return;
     }
 
@@ -127,6 +130,7 @@ export class OrderConsumer {
       attempts: 0,
     });
 
+    const startedAt = process.hrtime.bigint();
     let decision;
     try {
       decision = await this.processor.process(event, { isContinuation });
@@ -157,12 +161,14 @@ export class OrderConsumer {
           status: EventStatus.Dead,
           attempts: 0,
         });
+        this.metrics.eventsProcessed.inc({ outcome: 'db_error' });
         return;
       }
       this.logger.error(
         `processing failed for event ${event.eventId}`,
         error as Error,
       );
+      this.metrics.eventsProcessed.inc({ outcome: 'requeued' });
       // Unclassified failure, most often a transient dependency (Postgres or
       // the broker unreachable). Requeue rather than dead-letter: the attempt
       // counter lives in Postgres, so an outage there must not burn a retry
@@ -178,6 +184,10 @@ export class OrderConsumer {
       correlation_id: correlationId,
       decision: decision.kind,
     });
+    this.metrics.eventsProcessed.inc({ outcome: decision.kind });
+    this.metrics.processingDuration.observe(
+      Number(process.hrtime.bigint() - startedAt) / 1e9,
+    );
     this.telemetry.emit({
       stage: 'processing_decision',
       correlationId,

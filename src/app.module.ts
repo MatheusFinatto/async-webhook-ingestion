@@ -10,6 +10,7 @@ import { ConsumerModule } from './consumer/consumer.module';
 import { DlqModule } from './dlq/dlq.module';
 import { EventsModule } from './events/events.module';
 import { HealthModule } from './health/health.module';
+import { MetricsModule } from './metrics/metrics.module';
 import { TelemetryGatewayModule } from './telemetry/telemetry-gateway.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 
@@ -32,6 +33,7 @@ const roleModules = resolveRoleModules();
   imports: [
     ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
     ObservabilityModule,
+    MetricsModule,
     TypeOrmModule.forRootAsync({
       useFactory: () => ({
         ...buildDataSourceOptions(),

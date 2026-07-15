@@ -12,6 +12,7 @@ import {
   IdempotentEventProcessor,
   ProcessDecision,
 } from './idempotent-event-processor';
+import { MetricsService } from '../metrics/metrics.service';
 import { TelemetryEmitter } from '../telemetry/telemetry-emitter';
 import { OrderConsumer } from './order-consumer';
 
@@ -40,6 +41,7 @@ describe('OrderConsumer', () => {
   let processor: { process: jest.Mock };
   let amqp: { publish: jest.Mock };
   let telemetry: { emit: jest.Mock };
+  let outcomes: jest.Mock;
   let consumer: OrderConsumer;
 
   const validBody = {
@@ -53,10 +55,16 @@ describe('OrderConsumer', () => {
     processor = { process: jest.fn() };
     amqp = { publish: jest.fn().mockResolvedValue(true) };
     telemetry = { emit: jest.fn() };
+    outcomes = jest.fn();
+    const metrics = {
+      eventsProcessed: { inc: outcomes },
+      processingDuration: { observe: jest.fn() },
+    };
     consumer = new OrderConsumer(
       processor as unknown as IdempotentEventProcessor,
       amqp as unknown as AmqpConnection,
       telemetry as unknown as TelemetryEmitter,
+      metrics as unknown as MetricsService,
     );
   });
 

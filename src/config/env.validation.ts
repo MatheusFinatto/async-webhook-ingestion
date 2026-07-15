@@ -15,6 +15,7 @@ const POSITIVE_INT_VARS = [
   'POSTGRES_POOL_SIZE',
   'RATE_LIMIT_TTL_SECONDS',
   'RATE_LIMIT_MAX',
+  'WORKER_METRICS_PORT',
 ] as const;
 
 // Secrets the HTTP boundary compares against. An empty HMAC secret is

@@ -11,6 +11,7 @@ import {
   DEAD_LETTER_QUEUE,
   DEAD_LETTER_ROUTING_KEY,
 } from '../messaging/messaging.constants';
+import { MetricsService } from '../metrics/metrics.service';
 
 interface DeadLetter {
   event_id?: unknown;
@@ -24,7 +25,10 @@ interface DeadLetter {
 export class DlqConsumer {
   private readonly logger = new Logger(DlqConsumer.name);
 
-  constructor(private readonly dataSource: DataSource) {}
+  constructor(
+    private readonly dataSource: DataSource,
+    private readonly metrics: MetricsService,
+  ) {}
 
   @RabbitSubscribe({
     exchange: DEAD_LETTER_EXCHANGE,
@@ -89,6 +93,7 @@ export class DlqConsumer {
           event_id: eventId,
           correlation_id: correlationId,
         });
+        this.metrics.deadLettersPersisted.inc();
       } catch (error) {
         this.logger.error('failed to persist dead letter', error as Error);
         return new Nack(true);

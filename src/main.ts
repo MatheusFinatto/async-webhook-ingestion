@@ -8,6 +8,8 @@ import {
   isDemoMode,
 } from './common/demo-mode';
 import { JsonLogger } from './common/json-logger';
+import { MetricsService } from './metrics/metrics.service';
+import { startWorkerMetricsServer } from './metrics/worker-metrics-server';
 
 async function bootstrapApi(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
@@ -44,8 +46,13 @@ async function bootstrapWorker(): Promise<void> {
   });
   app.useLogger(app.get(JsonLogger));
   app.enableShutdownHooks();
+  const metricsPort = Number(process.env.WORKER_METRICS_PORT ?? 9091);
+  const metricsServer = await startWorkerMetricsServer(
+    app.get(MetricsService),
+    metricsPort,
+  );
   Logger.log(
-    'Worker role started; consuming the work and dead-letter queues',
+    `Worker role started; consuming the work and dead-letter queues, metrics on port ${metricsPort}`,
     'Bootstrap',
   );
   await new Promise<void>((resolve) => {
@@ -57,6 +64,7 @@ async function bootstrapWorker(): Promise<void> {
     process.once('SIGTERM', stop);
     process.once('SIGINT', stop);
   });
+  metricsServer.close();
   await app.close();
 }
 

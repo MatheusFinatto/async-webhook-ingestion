@@ -78,9 +78,14 @@ services:
       POSTGRES_PORT: 5432
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_PORT: 5672
+      # Fixed internal metrics port for the same reason as the api's PORT above.
+      WORKER_METRICS_PORT: 9091
     env_file:
       - path: .env
         required: false
+    ports:
+      # Loopback only: Prometheus scrape surface, not an application API.
+      - '127.0.0.1:${WORKER_METRICS_PORT:-9091}:9091'
     depends_on:
       postgres:
         condition: service_healthy
