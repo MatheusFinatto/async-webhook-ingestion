@@ -29,7 +29,10 @@ function formatBody(body: unknown): string {
 
 export function ResponsePanel({ token }: { token: Token | null }) {
   return (
-    <Panel title="HTTP response">
+    <Panel
+      title="HTTP response"
+      info="The real reply the API sent for this webhook: status code, response time, and the JSON body. 202 = accepted and queued for async processing; 4xx/5xx = rejected at the door."
+    >
       {!token || token.httpStatus === undefined ? (
         <Empty>Fire a scenario to see the real HTTP response.</Empty>
       ) : (

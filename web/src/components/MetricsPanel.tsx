@@ -25,7 +25,10 @@ export function MetricsPanel({
   const p95 = percentile(latencies, 95);
 
   return (
-    <Panel title="Live counters">
+    <Panel
+      title="Live counters"
+      info="Running tally of how each event ended up: processed OK, skipped as duplicate, retried, dead-lettered, or rejected. Below, the percentiles show how fast the API returned its 202 acknowledgement (measured in your browser)."
+    >
       <div className="grid grid-cols-5 gap-1.5">
         {COUNTER_META.map((meta) => (
           <div

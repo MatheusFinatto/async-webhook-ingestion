@@ -10,7 +10,10 @@ export function TokenDetail({
   groupSize: number;
 }) {
   return (
-    <Panel title="Event timeline">
+    <Panel
+      title="Event timeline"
+      info="Stage-by-stage trace of the selected event as it moved through the pipeline (received, signature checked, published, consumed, and its final outcome), with timings."
+    >
       {!token ? (
         <Empty>Select a token in the pipeline to inspect its journey.</Empty>
       ) : (
