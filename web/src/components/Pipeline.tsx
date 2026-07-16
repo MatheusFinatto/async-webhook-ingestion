@@ -10,6 +10,7 @@ import { retryTier, type StageEvent, type Token } from '../state/reducer';
 // tier duration below so the stopwatch visibly climbs to 5s / 30s / 2min.
 const TICK_MS = 200;
 const HOP_MS = 750;
+const CAPTION_LINGER_MS = 10_000;
 
 function retryNode(tier: string | undefined): NodeKey {
   if (tier === '30s') {
@@ -200,6 +201,47 @@ export function Pipeline({
   const [slow, setSlow] = useState(true);
   const paced = slow && !reduce;
 
+  const [pausedAt, setPausedAt] = useState<number | null>(null);
+  const paused = pausedAt !== null;
+
+  const togglePause = () => {
+    if (pausedAt === null) {
+      setPausedAt(Date.now());
+      return;
+    }
+    const delta = Date.now() - pausedAt;
+    setWalk((prev) =>
+      Object.fromEntries(
+        Object.entries(prev).map(([id, entry]) => [
+          id,
+          { ...entry, at: entry.at + delta },
+        ]),
+      ),
+    );
+    setPausedAt(null);
+  };
+
+  const step = (direction: 1 | -1) => {
+    const at = pausedAt ?? Date.now();
+    if (direction === -1 && pausedAt === null) {
+      setPausedAt(at);
+    }
+    const selected = tokens.filter(
+      (token) => token.correlationId === selectedId,
+    );
+    const stepping = selected.length > 0 ? selected : tokens;
+    setWalk((prev) => {
+      const next = { ...prev };
+      for (const token of stepping) {
+        const target = pathOf(token).length - 1;
+        const entry = prev[token.correlationId] ?? { index: 0, at };
+        const index = Math.min(Math.max(entry.index + direction, 0), target);
+        next[token.correlationId] = { index, at };
+      }
+      return next;
+    });
+  };
+
   // Real-time only: stamp when the ball lands in a retry box so its stopwatch
   // counts from arrival. Slow demo uses walk[].at instead.
   const retryArrival = useRef<Record<string, { node: NodeKey; at: number }>>(
@@ -207,7 +249,7 @@ export function Pipeline({
   );
 
   useEffect(() => {
-    if (!paced) {
+    if (!paced || paused) {
       return;
     }
     const timer = window.setInterval(() => {
@@ -242,7 +284,7 @@ export function Pipeline({
       });
     }, TICK_MS);
     return () => window.clearInterval(timer);
-  }, [tokens, paced]);
+  }, [tokens, paced, paused]);
 
   const seqOf = new Map<string, number>();
   tokens.forEach((token, index) => seqOf.set(token.correlationId, index + 1));
@@ -328,6 +370,47 @@ export function Pipeline({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-end gap-2 text-xs">
+        {paced ? (
+          <div className="inline-flex overflow-hidden rounded-md border border-border-subtle">
+            <button
+              type="button"
+              onClick={() => step(-1)}
+              title={
+                selectedId ? 'Step selected ball backward' : 'Step backward'
+              }
+              aria-label={
+                selectedId ? 'Step selected ball backward' : 'Step backward'
+              }
+              className="cursor-pointer px-2.5 py-1 text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg"
+            >
+              ‹
+            </button>
+            <button
+              type="button"
+              onClick={togglePause}
+              title={paused ? 'Resume' : 'Pause'}
+              aria-label={paused ? 'Resume' : 'Pause'}
+              className="cursor-pointer border-x border-border-subtle px-2.5 py-1 text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg"
+            >
+              {paused ? '▶' : '⏸'}
+            </button>
+            <button
+              type="button"
+              onClick={() => step(1)}
+              title={
+                selectedId
+                  ? 'Skip selected ball forward (jumps retry waits)'
+                  : 'Skip forward (jumps retry waits)'
+              }
+              aria-label={
+                selectedId ? 'Skip selected ball forward' : 'Skip forward'
+              }
+              className="cursor-pointer px-2.5 py-1 text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg"
+            >
+              ›
+            </button>
+          </div>
+        ) : null}
         <span className="text-fg-faint">Playback</span>
         <div className="inline-flex overflow-hidden rounded-md border border-border-subtle">
           {[
@@ -417,10 +500,18 @@ export function Pipeline({
               } else if (realtimeArrival?.node === node) {
                 arrivedAt = realtimeArrival.at;
               }
+              const clockNow = paced && pausedAt !== null ? pausedAt : now;
               const elapsed =
                 node.startsWith('retry') && arrivedAt !== undefined
-                  ? Math.max(0, Math.floor((now - arrivedAt) / 1000))
+                  ? Math.max(0, Math.floor((clockNow - arrivedAt) / 1000))
                   : null;
+              const settledAtMs = settledRef.current.get(token.correlationId);
+              const captionExpired =
+                atEnd &&
+                !paused &&
+                settledAtMs !== undefined &&
+                now - settledAtMs >= CAPTION_LINGER_MS;
+              const showCaption = paced && caption !== '' && !captionExpired;
               const captionHalfW = caption.length * 2.7;
               const captionX =
                 Math.min(
@@ -476,7 +567,7 @@ export function Pipeline({
                       ⏱ {elapsed}s
                     </text>
                   ) : null}
-                  {caption ? (
+                  {showCaption ? (
                     <text
                       x={captionX}
                       y={captionY}
