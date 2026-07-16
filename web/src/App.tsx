@@ -69,6 +69,9 @@ export default function App() {
     setSelectedId(null);
   };
 
+  const handleSelect = (id: string) =>
+    setSelectedId((current) => (current === id ? null : id));
+
   return (
     <div className="mx-auto flex min-h-screen max-w-[1200px] flex-col gap-5 p-4 sm:p-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
@@ -101,7 +104,7 @@ export default function App() {
         tokens={tokens}
         selectedId={selectedId}
         now={now}
-        onSelect={setSelectedId}
+        onSelect={handleSelect}
         onSettled={notifySettled}
       />
       {tokens.length === 0 ? (
@@ -121,7 +124,7 @@ export default function App() {
         <DlqPanel
           deadCount={state.counters.dead}
           selectedId={selectedId}
-          onSelect={setSelectedId}
+          onSelect={handleSelect}
         />
       </div>
 
