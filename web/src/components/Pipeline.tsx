@@ -1,14 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { STAGE_META, type NodeKey } from '../lib/stages';
-import {
-  EDGES,
-  NODES,
-  nodeCenter,
-  VIEWBOX_H,
-  VIEWBOX_W,
-} from '../lib/stages';
-import { retryTier, type Token } from '../state/reducer';
+import { EDGES, NODES, nodeCenter, VIEWBOX_H, VIEWBOX_W } from '../lib/stages';
+import { retryTier, type StageEvent, type Token } from '../state/reducer';
 
 // Slow-demo pacing. The walk is a scripted timeline, not tied to when telemetry
 // actually arrived: TICK_MS is how often we re-evaluate, HOP_MS is how long the
@@ -57,6 +51,63 @@ function mainIndex(node: NodeKey): number {
 interface PathStep {
   node: NodeKey;
   color: string;
+  caption: string;
+}
+
+const INFRA_CAPTION: Partial<Record<NodeKey, string>> = {
+  guard: 'HMAC-SHA256 signature accepted',
+  validate: 'schema valid → forwarded',
+  work: 'queued for the worker',
+};
+
+function infraCaption(token: Token, node: NodeKey): string {
+  if (token.httpStatus === 0) {
+    return '';
+  }
+  return INFRA_CAPTION[node] ?? '';
+}
+
+function rejectionCaption(token: Token): string {
+  const body = token.httpBody as { message?: unknown } | undefined;
+  const message = typeof body?.message === 'string' ? body.message : '';
+  if (message.includes('timestamp')) {
+    return 'timestamp outside accepted window → 401';
+  }
+  if (message.includes('signature')) {
+    return 'HMAC-SHA256 signature mismatch → 401';
+  }
+  return 'rejected by the HMAC guard → 401';
+}
+
+function captionFor(token: Token, event: StageEvent): string {
+  switch (event.stage) {
+    case 'received':
+      return 'signed POST /orders sent';
+    case 'signature_verified':
+      return 'HMAC-SHA256 signature accepted';
+    case 'rejected':
+      return rejectionCaption(token);
+    case 'malformed':
+      return 'schema rejected: missing event_id → 400';
+    case 'published':
+      return 'published to the webhooks exchange';
+    case 'unavailable':
+      return 'broker unreachable → 503';
+    case 'consuming':
+      return 'worker consumed the message';
+    case 'processing_decision':
+      return 'checking event_id in PostgreSQL';
+    case 'processed':
+      return 'event_id is new → inserted in PostgreSQL';
+    case 'duplicate':
+      return 'event_id already in PostgreSQL → discarded';
+    case 'retry':
+      return `attempt ${event.attempts ?? 1} failed → retry in ${retryTier(event.attempts ?? 1)}`;
+    case 'dead':
+      return 'permanent failure → dead-lettered';
+    default:
+      return '';
+  }
 }
 
 // The ordered nodes a token walks, each tagged with the colour to paint the ball
@@ -78,27 +129,43 @@ function pathOf(token: Token): PathStep[] {
         ? retryNode(retryTier(event.attempts ?? 1))
         : STAGE_META[event.stage].node;
     const color = STAGE_META[event.stage].color;
+    const caption = captionFor(token, event);
     const prev = tail()?.node;
     if (prev === node) {
       // Same box, a later stage (e.g. consuming -> processing on the worker):
       // keep one step but adopt the newer colour.
       tail().color = color;
+      tail().caption = caption;
       continue;
     }
     const from = prev ? mainIndex(prev) : -1;
     const to = mainIndex(node);
     if (from !== -1 && to > from + 1) {
       for (let k = from + 1; k < to; k += 1) {
-        path.push({ node: MAIN_ROW[k], color: inherited() });
+        path.push({
+          node: MAIN_ROW[k],
+          color: inherited(),
+          caption: infraCaption(token, MAIN_ROW[k]),
+        });
       }
     } else if (prev?.startsWith('retry') && node === 'postgres') {
-      path.push({ node: 'worker', color: inherited() });
+      path.push({
+        node: 'worker',
+        color: inherited(),
+        caption: 'redelivered → reprocessing',
+      });
     }
-    path.push({ node, color });
+    path.push({ node, color, caption });
   }
   return path.length > 0
     ? path
-    : [{ node: 'post', color: STAGE_META.received.color }];
+    : [
+        {
+          node: 'post',
+          color: STAGE_META.received.color,
+          caption: captionFor(token, { stage: 'received', ts: '' }),
+        },
+      ];
 }
 
 interface PipelineProps {
@@ -106,21 +173,28 @@ interface PipelineProps {
   selectedId: string | null;
   now: number;
   onSelect: (id: string) => void;
+  onSettled?: (correlationId: string) => void;
 }
 
 function tokenColor(token: Token): string {
   return STAGE_META[token.currentStage].color;
 }
 
-export function Pipeline({ tokens, selectedId, now, onSelect }: PipelineProps) {
+export function Pipeline({
+  tokens,
+  selectedId,
+  now,
+  onSelect,
+  onSettled,
+}: PipelineProps) {
   const reduce = useReducedMotion();
 
   // Slow-demo walk position per token: which pathOf() index is shown, plus the
   // wall-clock time the ball entered it. Both the step gate and the retry
   // stopwatch read `at`, so the timer and the dwell can never disagree.
-  const [walk, setWalk] = useState<Record<string, { index: number; at: number }>>(
-    {},
-  );
+  const [walk, setWalk] = useState<
+    Record<string, { index: number; at: number }>
+  >({});
   // Slow demo walk vs. real-time: real-time snaps each token to its current
   // stage so the pipeline tracks the backend as fast as telemetry arrives.
   const [slow, setSlow] = useState(true);
@@ -128,7 +202,9 @@ export function Pipeline({ tokens, selectedId, now, onSelect }: PipelineProps) {
 
   // Real-time only: stamp when the ball lands in a retry box so its stopwatch
   // counts from arrival. Slow demo uses walk[].at instead.
-  const retryArrival = useRef<Record<string, { node: NodeKey; at: number }>>({});
+  const retryArrival = useRef<Record<string, { node: NodeKey; at: number }>>(
+    {},
+  );
 
   useEffect(() => {
     if (!paced) {
@@ -174,7 +250,7 @@ export function Pipeline({ tokens, selectedId, now, onSelect }: PipelineProps) {
   const grouped = new Map<NodeKey, Token[]>();
   const visual = new Map<
     string,
-    { node: NodeKey; color: string; atEnd: boolean }
+    { node: NodeKey; color: string; caption: string; atEnd: boolean }
   >();
   for (const token of tokens) {
     const path = pathOf(token);
@@ -186,6 +262,7 @@ export function Pipeline({ tokens, selectedId, now, onSelect }: PipelineProps) {
     visual.set(token.correlationId, {
       node: key,
       color: step.color,
+      caption: step.caption,
       atEnd: index === path.length - 1,
     });
     if (!paced && key.startsWith('retry')) {
@@ -201,7 +278,16 @@ export function Pipeline({ tokens, selectedId, now, onSelect }: PipelineProps) {
 
   const positions = new Map<
     string,
-    { x: number; y: number; token: Token; node: NodeKey; color: string; atEnd: boolean }
+    {
+      x: number;
+      y: number;
+      token: Token;
+      node: NodeKey;
+      color: string;
+      caption: string;
+      captionRow: number;
+      atEnd: boolean;
+    }
   >();
   for (const [key, list] of grouped) {
     const center = nodeCenter(key);
@@ -214,10 +300,30 @@ export function Pipeline({ tokens, selectedId, now, onSelect }: PipelineProps) {
         token,
         node: key,
         color: info.color,
+        caption: info.caption,
+        captionRow: index,
         atEnd: info.atEnd,
       });
     });
   }
+
+  const settledRef = useRef<Map<string, number>>(new Map());
+  const settledNow = tokens
+    .filter((token) => {
+      const info = visual.get(token.correlationId);
+      return (
+        token.terminal &&
+        info?.atEnd === true &&
+        !settledRef.current.has(token.correlationId)
+      );
+    })
+    .map((token) => token.correlationId);
+  useEffect(() => {
+    for (const id of settledNow) {
+      settledRef.current.set(id, Date.now());
+      onSettled?.(id);
+    }
+  });
 
   return (
     <div className="flex flex-col gap-2">
@@ -243,130 +349,156 @@ export function Pipeline({ tokens, selectedId, now, onSelect }: PipelineProps) {
           ))}
         </div>
       </div>
-    <div className="overflow-x-auto rounded-lg border border-border-subtle bg-surface p-2">
-      <svg
-        viewBox={`0 0 ${VIEWBOX_W} ${VIEWBOX_H}`}
-        className="w-full min-w-[860px]"
-        role="img"
-        aria-label="Webhook ingestion pipeline"
-      >
-        {EDGES.map((edge) => {
-          const from = nodeCenter(edge.from);
-          const to = nodeCenter(edge.to);
-          return (
-            <line
-              key={`${edge.from}-${edge.to}`}
-              x1={from.x}
-              y1={from.y}
-              x2={to.x}
-              y2={to.y}
-              stroke="var(--border-strong)"
-              strokeWidth={1.5}
-              strokeDasharray="4 4"
-            />
-          );
-        })}
+      <div className="overflow-x-auto rounded-lg border border-border-subtle bg-surface p-2">
+        <svg
+          viewBox={`0 0 ${VIEWBOX_W} ${VIEWBOX_H}`}
+          className="w-full min-w-[860px]"
+          role="img"
+          aria-label="Webhook ingestion pipeline"
+        >
+          {EDGES.map((edge) => {
+            const from = nodeCenter(edge.from);
+            const to = nodeCenter(edge.to);
+            return (
+              <line
+                key={`${edge.from}-${edge.to}`}
+                x1={from.x}
+                y1={from.y}
+                x2={to.x}
+                y2={to.y}
+                stroke="var(--border-strong)"
+                strokeWidth={1.5}
+                strokeDasharray="4 4"
+              />
+            );
+          })}
 
-        {NODES.map((node) => (
-          <g key={node.key}>
-            <rect
-              x={node.x}
-              y={node.y}
-              width={node.w}
-              height={node.h}
-              rx={8}
-              fill="var(--surface-2)"
-              stroke="var(--border-strong)"
-            />
-            <text
-              x={node.x + node.w / 2}
-              y={node.y + node.h / 2 - 2}
-              textAnchor="middle"
-              fill="var(--text)"
-              fontSize={12}
-              fontWeight={600}
-            >
-              {node.label}
-            </text>
-            {node.sub ? (
+          {NODES.map((node) => (
+            <g key={node.key}>
+              <rect
+                x={node.x}
+                y={node.y}
+                width={node.w}
+                height={node.h}
+                rx={8}
+                fill="var(--surface-2)"
+                stroke="var(--border-strong)"
+              />
               <text
                 x={node.x + node.w / 2}
-                y={node.y + node.h / 2 + 13}
+                y={node.y + node.h / 2 - 2}
                 textAnchor="middle"
-                fill="var(--text-faint)"
-                fontSize={9}
+                fill="var(--text)"
+                fontSize={12}
+                fontWeight={600}
               >
-                {node.sub}
+                {node.label}
               </text>
-            ) : null}
-          </g>
-        ))}
-
-        {[...positions.values()].map(({ x, y, token, node, color, atEnd }) => {
-          const realtimeArrival = retryArrival.current[token.correlationId];
-          let arrivedAt: number | undefined;
-          if (paced) {
-            arrivedAt = walk[token.correlationId]?.at;
-          } else if (realtimeArrival?.node === node) {
-            arrivedAt = realtimeArrival.at;
-          }
-          const elapsed =
-            node.startsWith('retry') && arrivedAt !== undefined
-              ? Math.max(0, Math.floor((now - arrivedAt) / 1000))
-              : null;
-          return (
-            <motion.g
-              key={token.correlationId}
-              initial={false}
-              animate={{ x, y }}
-              transition={
-                paced
-                  ? { type: 'tween', duration: 0.55, ease: 'easeInOut' }
-                  : { type: 'tween', duration: 0.18, ease: 'easeOut' }
-              }
-              style={{ cursor: 'pointer' }}
-              onClick={() => onSelect(token.correlationId)}
-            >
-              <circle
-                r={selectedId === token.correlationId ? 12 : 9}
-                fill={color}
-                stroke={
-                  selectedId === token.correlationId
-                    ? 'var(--text)'
-                    : 'transparent'
-                }
-                strokeWidth={2}
-              />
-              {token.terminal && atEnd ? (
-                <circle r={14} fill="none" stroke={color} strokeWidth={1} />
-              ) : null}
-              <text
-                textAnchor="middle"
-                dominantBaseline="central"
-                fill="#0b0f1a"
-                fontSize={10}
-                fontWeight={700}
-                style={{ pointerEvents: 'none' }}
-                className="mono"
-              >
-                {seqOf.get(token.correlationId)}
-              </text>
-              {elapsed !== null ? (
+              {node.sub ? (
                 <text
-                  y={-17}
+                  x={node.x + node.w / 2}
+                  y={node.y + node.h / 2 + 13}
                   textAnchor="middle"
-                  fill="var(--text-muted)"
-                  fontSize={10}
-                  className="mono"
+                  fill="var(--text-faint)"
+                  fontSize={9}
                 >
-                  ⏱ {elapsed}s
+                  {node.sub}
                 </text>
               ) : null}
-            </motion.g>
-          );
-        })}
-      </svg>
-    </div>
+            </g>
+          ))}
+
+          {[...positions.values()].map(
+            ({ x, y, token, node, color, caption, captionRow, atEnd }) => {
+              const realtimeArrival = retryArrival.current[token.correlationId];
+              let arrivedAt: number | undefined;
+              if (paced) {
+                arrivedAt = walk[token.correlationId]?.at;
+              } else if (realtimeArrival?.node === node) {
+                arrivedAt = realtimeArrival.at;
+              }
+              const elapsed =
+                node.startsWith('retry') && arrivedAt !== undefined
+                  ? Math.max(0, Math.floor((now - arrivedAt) / 1000))
+                  : null;
+              const captionHalfW = caption.length * 2.7;
+              const captionX =
+                Math.min(
+                  Math.max(x, captionHalfW + 6),
+                  VIEWBOX_W - captionHalfW - 6,
+                ) - x;
+              const captionY = -30 - captionRow * 11;
+              return (
+                <motion.g
+                  key={token.correlationId}
+                  initial={false}
+                  animate={{ x, y }}
+                  transition={
+                    paced
+                      ? { type: 'tween', duration: 0.55, ease: 'easeInOut' }
+                      : { type: 'tween', duration: 0.18, ease: 'easeOut' }
+                  }
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => onSelect(token.correlationId)}
+                >
+                  <circle
+                    r={selectedId === token.correlationId ? 12 : 9}
+                    fill={color}
+                    stroke={
+                      selectedId === token.correlationId
+                        ? 'var(--text)'
+                        : 'transparent'
+                    }
+                    strokeWidth={2}
+                  />
+                  {token.terminal && atEnd ? (
+                    <circle r={14} fill="none" stroke={color} strokeWidth={1} />
+                  ) : null}
+                  <text
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    fill="#0b0f1a"
+                    fontSize={10}
+                    fontWeight={700}
+                    style={{ pointerEvents: 'none' }}
+                    className="mono"
+                  >
+                    {seqOf.get(token.correlationId)}
+                  </text>
+                  {elapsed !== null ? (
+                    <text
+                      y={-17}
+                      textAnchor="middle"
+                      fill="var(--text-muted)"
+                      fontSize={10}
+                      className="mono"
+                    >
+                      ⏱ {elapsed}s
+                    </text>
+                  ) : null}
+                  {caption ? (
+                    <text
+                      x={captionX}
+                      y={captionY}
+                      textAnchor="middle"
+                      fill="var(--text-muted)"
+                      fontSize={12}
+                      style={{
+                        pointerEvents: 'none',
+                        paintOrder: 'stroke',
+                        stroke: 'var(--surface)',
+                        strokeWidth: 3,
+                      }}
+                    >
+                      {caption}
+                    </text>
+                  ) : null}
+                </motion.g>
+              );
+            },
+          )}
+        </svg>
+      </div>
       <div className="flex flex-wrap gap-x-4 gap-y-1.5 px-1 text-xs">
         {tokens.map((token, index) => {
           const color = tokenColor(token);

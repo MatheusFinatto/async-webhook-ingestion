@@ -68,7 +68,7 @@ export const STAGE_META: Record<Stage, StageMeta> = {
   duplicate: {
     label: 'duplicate',
     color: 'var(--color-stage-duplicate)',
-    node: 'postgres',
+    node: 'worker',
   },
   retry: {
     label: 'retry',

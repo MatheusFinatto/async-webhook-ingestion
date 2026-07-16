@@ -20,8 +20,14 @@ const EXAMPLE_BODY = JSON.stringify({
 
 export default function App() {
   const { theme, toggle } = useTheme();
-  const { state, connection, unknownVersions, runScenario, reset } =
-    useDemoStore();
+  const {
+    state,
+    connection,
+    unknownVersions,
+    runScenario,
+    reset,
+    notifySettled,
+  } = useDemoStore();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [now, setNow] = useState(() => Date.now());
@@ -96,6 +102,7 @@ export default function App() {
         selectedId={selectedId}
         now={now}
         onSelect={setSelectedId}
+        onSettled={notifySettled}
       />
       {tokens.length === 0 ? (
         <p className="text-center text-xs text-fg-faint">

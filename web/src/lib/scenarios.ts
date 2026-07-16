@@ -24,6 +24,7 @@ export interface ScenarioDef {
   label: string;
   description: string;
   expected: string;
+  sequential?: boolean;
   build: () => TriggerSpec[];
 }
 
@@ -100,8 +101,10 @@ export const SCENARIOS: ScenarioDef[] = [
   {
     id: 'duplicate',
     label: 'Duplicate',
-    description: 'Same event_id twice, distinct correlation_id → processed + duplicate',
+    description:
+      'Same event_id twice: second fires after the first lands → processed + discarded',
     expected: '202 / 202',
+    sequential: true,
     build: () => {
       const eventId = newEventId();
       const body = orderBody(eventId);

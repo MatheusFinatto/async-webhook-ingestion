@@ -55,10 +55,63 @@ function env(correlationId: string): TelemetryEnvelope {
   };
 }
 
+describe('useDemoStore sequential scenarios', () => {
+  beforeEach(() => {
+    captured = null;
+    createCount = 0;
+    disconnect.mockClear();
+  });
+
+  it('holds the second duplicate request until the first ball settles', async () => {
+    const { result } = renderHook(() => useDemoStore());
+
+    let finished = false;
+    let run: Promise<void>;
+    act(() => {
+      run = result.current.runScenario('duplicate').then(() => {
+        finished = true;
+      });
+    });
+
+    await waitFor(() => expect(result.current.state.order.length).toBe(1));
+    expect(finished).toBe(false);
+
+    const first = result.current.state.order[0];
+    act(() => {
+      result.current.notifySettled(first);
+    });
+
+    await waitFor(() => expect(result.current.state.order.length).toBe(2));
+    await act(async () => {
+      await run;
+    });
+    expect(result.current.state.order.length).toBe(2);
+  });
+
+  it('releases a pending settle wait on reset', async () => {
+    const { result } = renderHook(() => useDemoStore());
+
+    let run: Promise<void>;
+    act(() => {
+      run = result.current.runScenario('duplicate');
+    });
+    await waitFor(() => expect(result.current.state.order.length).toBe(1));
+
+    act(() => {
+      result.current.reset();
+    });
+    await act(async () => {
+      await run;
+    });
+    expect(result.current.state.order.length).toBe(0);
+  });
+});
+
 describe('useDemoStore reset', () => {
   beforeEach(() => {
     captured = null;
     createCount = 0;
+    disconnect.mockClear();
   });
 
   it('clears tokens and counters without recreating the socket', async () => {
