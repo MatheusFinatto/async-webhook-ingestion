@@ -122,6 +122,7 @@ export interface DlqEntry {
   attempts: number;
   payload: string | null;
   createdAt: string;
+  replayedAt: string | null;
 }
 
 export interface DlqPage {
@@ -139,6 +140,23 @@ export async function fetchDlq(): Promise<DlqPage> {
     throw new Error(`GET /dlq failed with ${response.status}`);
   }
   return (await response.json()) as DlqPage;
+}
+
+export interface ReplayReceipt {
+  event_id: string;
+  correlation_id: string;
+  status: string;
+}
+
+export async function replayDlq(id: string): Promise<ReplayReceipt> {
+  const response = await fetch(`${config.apiUrl}/dlq/${id}/replay`, {
+    method: 'POST',
+    headers: { 'x-admin-key': config.adminKey },
+  });
+  if (!response.ok) {
+    throw new Error(`replay failed with ${response.status}`);
+  }
+  return (await response.json()) as ReplayReceipt;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

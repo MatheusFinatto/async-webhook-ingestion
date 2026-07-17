@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { fetchDlq, type DlqEntry } from '../lib/api';
+import { fetchDlq, replayDlq, type DlqEntry } from '../lib/api';
 import { Empty, Panel } from './ui';
 
 interface DlqPanelProps {
@@ -91,6 +91,8 @@ export function DlqPanel({ deadCount, selectedId, onSelect }: DlqPanelProps) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
+  const [replayingId, setReplayingId] = useState<string | null>(null);
+  const [replayNote, setReplayNote] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -109,6 +111,29 @@ export function DlqPanel({ deadCount, selectedId, onSelect }: DlqPanelProps) {
   useEffect(() => {
     void refresh();
   }, [refresh, deadCount]);
+
+  const replay = useCallback(
+    async (entry: DlqEntry) => {
+      setReplayingId(entry.id);
+      setReplayNote(null);
+      try {
+        await replayDlq(entry.id);
+        setReplayNote(
+          `replayed ${entry.eventId ?? entry.id}: state reset, message republished, retry budget restarted`,
+        );
+        await refresh();
+      } catch (cause) {
+        setReplayNote(
+          cause instanceof Error
+            ? `${cause.message} (already processed, in flight, or missing event_id)`
+            : 'replay failed',
+        );
+      } finally {
+        setReplayingId(null);
+      }
+    },
+    [refresh],
+  );
 
   return (
     <Panel
@@ -176,9 +201,22 @@ export function DlqPanel({ deadCount, selectedId, onSelect }: DlqPanelProps) {
                   <div className="mt-1.5 leading-relaxed text-fg-muted">
                     {diag.summary}
                   </div>
-                  <div className="mono mt-1 truncate text-[10px] text-fg-faint">
-                    {entry.eventId ?? entry.correlationId} ·{' '}
-                    {new Date(entry.createdAt).toLocaleTimeString()}
+                  <div className="mono mt-1 flex items-center gap-1.5 truncate text-[10px] text-fg-faint">
+                    <span className="truncate">
+                      {entry.eventId ?? entry.correlationId}
+                    </span>
+                    <span>· {new Date(entry.createdAt).toLocaleTimeString()}</span>
+                    {entry.replayedAt ? (
+                      <span
+                        className="rounded px-1 py-px font-semibold uppercase"
+                        style={{
+                          backgroundColor: 'var(--surface-2)',
+                          color: 'var(--color-stage-published)',
+                        }}
+                      >
+                        replayed
+                      </span>
+                    ) : null}
                   </div>
                 </button>
                 {selectedId === entry.correlationId ? (
@@ -197,7 +235,24 @@ export function DlqPanel({ deadCount, selectedId, onSelect }: DlqPanelProps) {
                         label="failed_at"
                         value={new Date(entry.createdAt).toLocaleString()}
                       />
+                      {entry.replayedAt ? (
+                        <DetailRow
+                          label="replayed_at"
+                          value={new Date(entry.replayedAt).toLocaleString()}
+                        />
+                      ) : null}
                     </dl>
+                    <button
+                      type="button"
+                      onClick={() => void replay(entry)}
+                      disabled={replayingId !== null}
+                      aria-busy={replayingId === entry.id}
+                      className="mt-2 cursor-pointer rounded-md border border-border-subtle px-2.5 py-1 text-xs text-fg-muted transition-colors hover:border-border-strong hover:text-fg disabled:cursor-wait disabled:opacity-60"
+                    >
+                      {replayingId === entry.id
+                        ? 'replaying...'
+                        : 'replay via POST /dlq/:id/replay'}
+                    </button>
                     <div className="mt-2 text-[10px] uppercase tracking-wider text-fg-faint">
                       payload
                     </div>
@@ -211,6 +266,11 @@ export function DlqPanel({ deadCount, selectedId, onSelect }: DlqPanelProps) {
           })}
         </ul>
       )}
+      {replayNote ? (
+        <p className="mt-2 text-[11px] leading-relaxed text-fg-muted">
+          {replayNote}
+        </p>
+      ) : null}
       {!error && updatedAt !== null ? (
         <p className="mono mt-3 text-[10px] text-fg-faint">
           {entries.length} shown · updated{' '}
