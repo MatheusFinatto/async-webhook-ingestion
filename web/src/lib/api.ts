@@ -148,6 +148,16 @@ export interface ReplayReceipt {
   status: string;
 }
 
+export async function discardDlq(id: string): Promise<void> {
+  const response = await fetch(`${config.apiUrl}/dlq/${id}`, {
+    method: 'DELETE',
+    headers: { 'x-admin-key': config.adminKey },
+  });
+  if (!response.ok) {
+    throw new Error(`DELETE /dlq/${id} failed with ${response.status}`);
+  }
+}
+
 export async function replayDlq(id: string): Promise<ReplayReceipt> {
   const response = await fetch(`${config.apiUrl}/dlq/${id}/replay`, {
     method: 'POST',

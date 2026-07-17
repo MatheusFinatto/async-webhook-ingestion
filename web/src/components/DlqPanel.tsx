@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { fetchDlq, replayDlq, type DlqEntry } from '../lib/api';
+import { discardDlq, fetchDlq, replayDlq, type DlqEntry } from '../lib/api';
 import { Empty, Panel } from './ui';
 
 interface DlqPanelProps {
@@ -112,6 +112,19 @@ export function DlqPanel({ deadCount, selectedId, onSelect }: DlqPanelProps) {
     void refresh();
   }, [refresh, deadCount]);
 
+  const discard = useCallback(
+    async (entry: DlqEntry) => {
+      try {
+        await discardDlq(entry.id);
+        setReplayNote(null);
+        await refresh();
+      } catch {
+        setReplayNote(`could not discard ${entry.eventId ?? entry.id}`);
+      }
+    },
+    [refresh],
+  );
+
   const replay = useCallback(
     async (entry: DlqEntry) => {
       setReplayingId(entry.id);
@@ -175,7 +188,16 @@ export function DlqPanel({ deadCount, selectedId, onSelect }: DlqPanelProps) {
           {entries.map((entry) => {
             const diag = diagnose(entry);
             return (
-              <li key={entry.id}>
+              <li key={entry.id} className="relative">
+                <button
+                  type="button"
+                  onClick={() => void discard(entry)}
+                  title="Discard this dead letter (DELETE /dlq/:id)"
+                  aria-label={`Discard dead letter ${entry.eventId ?? entry.id}`}
+                  className="absolute right-1 top-1 z-10 flex h-5 w-5 cursor-pointer items-center justify-center rounded text-sm leading-none text-fg-faint transition-colors hover:bg-surface-2 hover:text-fg"
+                >
+                  ×
+                </button>
                 <button
                   type="button"
                   onClick={() => onSelect(entry.correlationId)}
@@ -186,7 +208,7 @@ export function DlqPanel({ deadCount, selectedId, onSelect }: DlqPanelProps) {
                       : 'border-border-subtle hover:border-border-strong'
                   }`}
                 >
-                  <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center justify-between gap-2 pr-5">
                     <span
                       className="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
                       style={{

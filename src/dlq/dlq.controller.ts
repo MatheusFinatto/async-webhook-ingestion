@@ -1,8 +1,10 @@
 import {
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
+  NotFoundException,
   Param,
   ParseUUIDPipe,
   Post,
@@ -80,5 +82,22 @@ export class DlqController {
   })
   replay(@Param('id', ParseUUIDPipe) id: string): Promise<ReplayReceipt> {
     return this.replayService.replay(id);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Discard a dead letter',
+    description:
+      'Removes the stored dead-letter row. The event state table is untouched: a discarded failure stays failed, it just no longer clutters the queue listing.',
+  })
+  @ApiParam({ name: 'id', format: 'uuid', description: 'dlq_messages.id' })
+  @ApiResponse({ status: 204, description: 'Dead letter discarded' })
+  @ApiResponse({ status: 404, description: 'Unknown dead letter' })
+  async discard(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
+    const result = await this.dlqMessages.delete({ id });
+    if (result.affected === 0) {
+      throw new NotFoundException('unknown dead letter');
+    }
   }
 }
