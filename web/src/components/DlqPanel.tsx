@@ -19,6 +19,73 @@ function formatPayload(payload: string | null): string {
   }
 }
 
+const MAX_ATTEMPTS = 4;
+
+interface Diagnosis {
+  badge: string;
+  color: string;
+  summary: string;
+}
+
+function diagnose(entry: DlqEntry): Diagnosis {
+  const reason = entry.reason.toLowerCase();
+  if (reason.includes('unparseable') || reason.includes('missing event_id')) {
+    return {
+      badge: 'poison message',
+      color: 'var(--color-stage-dead)',
+      summary:
+        'The body could not even be parsed into an event, so there was nothing to retry.',
+    };
+  }
+  if (reason.includes('permanent')) {
+    return {
+      badge: 'permanent error',
+      color: 'var(--color-stage-dead)',
+      summary:
+        'The handler flagged this failure as unfixable, so it skipped the retry ladder and came straight here.',
+    };
+  }
+  if (
+    entry.attempts > 1 ||
+    reason.includes('transient') ||
+    reason.includes('attempt')
+  ) {
+    return {
+      badge: 'retries exhausted',
+      color: 'var(--color-stage-retry)',
+      summary: `Failed ${entry.attempts} times across the retry ladder (5s, 30s, 2min) and gave up.`,
+    };
+  }
+  return {
+    badge: 'unknown',
+    color: 'var(--text-faint)',
+    summary: 'Dead-lettered without a reason the worker recognizes.',
+  };
+}
+
+function AttemptDots({ attempts }: { attempts: number }) {
+  return (
+    <span
+      className="flex items-center gap-1"
+      title={`${attempts} of ${MAX_ATTEMPTS} attempts used`}
+    >
+      {Array.from({ length: MAX_ATTEMPTS }, (_, slot) => (
+        <span
+          key={slot}
+          className="inline-block h-1.5 w-1.5 rounded-full"
+          style={{
+            backgroundColor: 'var(--color-stage-retry)',
+            opacity: slot < attempts ? 1 : 0.25,
+          }}
+        />
+      ))}
+      <span className="mono ml-0.5 text-[10px] text-fg-faint">
+        {attempts}/{MAX_ATTEMPTS}
+      </span>
+    </span>
+  );
+}
+
 export function DlqPanel({ deadCount, selectedId, onSelect }: DlqPanelProps) {
   const [entries, setEntries] = useState<DlqEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -80,53 +147,68 @@ export function DlqPanel({ deadCount, selectedId, onSelect }: DlqPanelProps) {
         <Empty>No dead-lettered messages yet.</Empty>
       ) : (
         <ul className="flex flex-col gap-2">
-          {entries.map((entry) => (
-            <li key={entry.id}>
-              <button
-                type="button"
-                onClick={() => onSelect(entry.correlationId)}
-                className={`w-full rounded-md border px-3 py-2 text-left text-xs transition-colors ${
-                  selectedId === entry.correlationId
-                    ? 'border-border-strong bg-surface-2'
-                    : 'border-border-subtle hover:border-border-strong'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="mono truncate" style={{ maxWidth: '60%' }}>
-                    {entry.correlationId}
-                  </span>
-                  <span className="mono text-fg-faint">
-                    attempts {entry.attempts}
-                  </span>
-                </div>
-                <div className="mt-1 text-fg-muted">{entry.reason}</div>
-                <div className="mono mt-0.5 text-[10px] text-fg-faint">
-                  {new Date(entry.createdAt).toLocaleTimeString()}
-                </div>
-              </button>
-              {selectedId === entry.correlationId ? (
-                <div className="mt-1.5 rounded-md border border-border-subtle bg-surface-2 px-3 py-2 text-xs">
-                  <dl className="flex flex-col gap-1">
-                    <DetailRow label="event_id" value={entry.eventId ?? '(none)'} />
-                    <DetailRow
-                      label="message_id"
-                      value={entry.messageId ?? '(none)'}
-                    />
-                    <DetailRow
-                      label="failed_at"
-                      value={new Date(entry.createdAt).toLocaleString()}
-                    />
-                  </dl>
-                  <div className="mt-2 text-[10px] uppercase tracking-wider text-fg-faint">
-                    payload
+          {entries.map((entry) => {
+            const diag = diagnose(entry);
+            return (
+              <li key={entry.id}>
+                <button
+                  type="button"
+                  onClick={() => onSelect(entry.correlationId)}
+                  style={{ borderLeftColor: diag.color, borderLeftWidth: 3 }}
+                  className={`w-full rounded-md border px-3 py-2 text-left text-xs transition-colors ${
+                    selectedId === entry.correlationId
+                      ? 'border-border-strong bg-surface-2'
+                      : 'border-border-subtle hover:border-border-strong'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span
+                      className="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
+                      style={{
+                        backgroundColor: 'var(--surface-2)',
+                        color: diag.color,
+                      }}
+                    >
+                      {diag.badge}
+                    </span>
+                    <AttemptDots attempts={entry.attempts} />
                   </div>
-                  <pre className="mono mt-1 max-h-40 overflow-auto rounded bg-surface p-2 text-[11px] leading-relaxed">
-                    {formatPayload(entry.payload)}
-                  </pre>
-                </div>
-              ) : null}
-            </li>
-          ))}
+                  <div className="mt-1.5 leading-relaxed text-fg-muted">
+                    {diag.summary}
+                  </div>
+                  <div className="mono mt-1 truncate text-[10px] text-fg-faint">
+                    {entry.eventId ?? entry.correlationId} ·{' '}
+                    {new Date(entry.createdAt).toLocaleTimeString()}
+                  </div>
+                </button>
+                {selectedId === entry.correlationId ? (
+                  <div className="mt-1.5 rounded-md border border-border-subtle bg-surface-2 px-3 py-2 text-xs">
+                    <dl className="flex flex-col gap-1">
+                      <DetailRow
+                        label="event_id"
+                        value={entry.eventId ?? '(none)'}
+                      />
+                      <DetailRow
+                        label="message_id"
+                        value={entry.messageId ?? '(none)'}
+                      />
+                      <DetailRow label="raw reason" value={entry.reason} />
+                      <DetailRow
+                        label="failed_at"
+                        value={new Date(entry.createdAt).toLocaleString()}
+                      />
+                    </dl>
+                    <div className="mt-2 text-[10px] uppercase tracking-wider text-fg-faint">
+                      payload
+                    </div>
+                    <pre className="mono mt-1 max-h-40 overflow-auto rounded bg-surface p-2 text-[11px] leading-relaxed">
+                      {formatPayload(entry.payload)}
+                    </pre>
+                  </div>
+                ) : null}
+              </li>
+            );
+          })}
         </ul>
       )}
       {!error && updatedAt !== null ? (
