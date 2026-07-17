@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
-import { trigger } from '../lib/api';
+import { injectPoison, trigger } from '../lib/api';
 import { SCENARIOS, type ScenarioId, type TriggerSpec } from '../lib/scenarios';
 import {
   createTelemetrySocket,
@@ -79,9 +79,12 @@ export function useDemoStore(): DemoStore {
           scenario: scenario.id,
           label: spec.label,
           ts: new Date().toISOString(),
+          initialStage: scenario.inject ? 'injected' : 'received',
         });
         try {
-          const result = await trigger(spec);
+          const result = scenario.inject
+            ? await injectPoison(spec)
+            : await trigger(spec);
           dispatch({ type: 'http_result', scenario: scenario.id, result });
         } catch {
           dispatch({

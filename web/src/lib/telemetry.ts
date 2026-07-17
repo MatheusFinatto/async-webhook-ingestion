@@ -12,6 +12,7 @@ export type ApiStage =
   | 'received'
   | 'signature_verified'
   | 'published'
+  | 'injected'
   | 'rejected'
   | 'malformed'
   | 'unavailable';
@@ -35,6 +36,7 @@ export const STAGE_RANK: Record<Stage, number> = {
   malformed: 1,
   rejected: 1,
   published: 2,
+  injected: 2,
   unavailable: 2,
   consuming: 3,
   processing_decision: 4,

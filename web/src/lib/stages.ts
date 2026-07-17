@@ -45,6 +45,11 @@ export const STAGE_META: Record<Stage, StageMeta> = {
     color: 'var(--color-stage-published)',
     node: 'exchange',
   },
+  injected: {
+    label: 'injected past the API',
+    color: 'var(--color-stage-published)',
+    node: 'exchange',
+  },
   unavailable: {
     label: 'unavailable (503)',
     color: 'var(--color-stage-unavailable)',

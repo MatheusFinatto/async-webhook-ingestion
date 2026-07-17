@@ -92,6 +92,8 @@ function captionFor(token: Token, event: StageEvent): string {
       return 'schema rejected: missing event_id → 400';
     case 'published':
       return 'published to the webhooks exchange';
+    case 'injected':
+      return 'injected straight into the exchange, no API, no signature';
     case 'unavailable':
       return 'broker unreachable → 503';
     case 'consuming':
@@ -105,7 +107,9 @@ function captionFor(token: Token, event: StageEvent): string {
     case 'retry':
       return `attempt ${event.attempts ?? 1} failed → retry in ${retryTier(event.attempts ?? 1)}`;
     case 'dead':
-      return 'permanent failure → dead-lettered';
+      return token.scenario === 'poison'
+        ? 'unparseable, no event_id to retry → dead on arrival'
+        : 'permanent failure → dead-lettered';
     default:
       return '';
   }

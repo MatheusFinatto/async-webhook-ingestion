@@ -79,6 +79,40 @@ export async function trigger(spec: TriggerSpec): Promise<TriggerResult> {
   };
 }
 
+export async function injectPoison(spec: TriggerSpec): Promise<TriggerResult> {
+  const started = performance.now();
+  const response = await fetch(`${config.apiUrl}/demo/poison`, {
+    method: 'POST',
+    headers: { 'x-correlation-id': spec.correlationId },
+  });
+  const latencyMs = performance.now() - started;
+
+  const bodyText = await response.text();
+  let body: unknown = bodyText;
+  try {
+    body = JSON.parse(bodyText);
+  } catch {
+    body = bodyText;
+  }
+
+  return {
+    correlationId: spec.correlationId,
+    eventId: null,
+    eventType: spec.eventType,
+    status: response.status,
+    ok: response.ok,
+    bodyText,
+    body,
+    latencyMs,
+    signed: { timestamp: '', rawBody: '', canonical: '', signature: '' },
+    apiStage: response.ok ? 'injected' : 'unavailable',
+    respondedCorrelationId:
+      isRecord(body) && typeof body.correlation_id === 'string'
+        ? body.correlation_id
+        : null,
+  };
+}
+
 export interface DlqEntry {
   id: string;
   messageId: string | null;

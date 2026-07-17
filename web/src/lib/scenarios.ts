@@ -8,6 +8,7 @@ export type ScenarioId =
   | 'transient'
   | 'exhaust'
   | 'permanent'
+  | 'poison'
   | 'malformed';
 
 export interface TriggerSpec {
@@ -34,6 +35,7 @@ export interface ScenarioDef {
   story: StoryStep[];
   expected: string;
   sequential?: boolean;
+  inject?: boolean;
   build: () => TriggerSpec[];
 }
 
@@ -233,6 +235,30 @@ export const SCENARIOS: ScenarioDef[] = [
           eventType: EVENT_TYPE,
           body: orderBody(eventId, { __scenario: 'permanent' }),
           label: 'Permanent failure',
+        },
+      ];
+    },
+  },
+  {
+    id: 'poison',
+    label: 'Poison message',
+    description: 'Garbage injected into the queue past the API → dead on arrival',
+    story: [
+      { tone: 'info', text: 'A rogue producer writes garbage straight to the queue' },
+      { tone: 'info', text: 'It never touched the API, so no guard could block it' },
+      { tone: 'fail', text: 'The worker cannot parse an event_id out of the bytes' },
+      { tone: 'fail', text: 'Dead-lettered on arrival, zero retries wasted' },
+    ],
+    expected: '202',
+    inject: true,
+    build: () => {
+      return [
+        {
+          correlationId: newCorrelationId(),
+          eventId: null,
+          eventType: 'unknown',
+          body: {},
+          label: 'Poison message',
         },
       ];
     },

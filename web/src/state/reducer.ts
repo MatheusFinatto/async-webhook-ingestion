@@ -69,6 +69,7 @@ export interface TriggerStarted {
   scenario: ScenarioId;
   label: string;
   ts: string;
+  initialStage?: 'received' | 'injected';
 }
 
 export type Action =
@@ -130,6 +131,7 @@ function withStage(token: Token, event: StageEvent): Token {
 export function reducer(state: DemoState, action: Action): DemoState {
   switch (action.type) {
     case 'trigger_started': {
+      const initialStage = action.initialStage ?? 'received';
       const token: Token = {
         correlationId: action.correlationId,
         eventId: action.eventId,
@@ -137,8 +139,8 @@ export function reducer(state: DemoState, action: Action): DemoState {
         scenario: action.scenario,
         label: action.label,
         color: colorFor(action.correlationId),
-        stages: [{ stage: 'received', ts: action.ts }],
-        currentStage: 'received',
+        stages: [{ stage: initialStage, ts: action.ts }],
+        currentStage: initialStage,
         terminal: false,
         attempts: 0,
       };
@@ -176,7 +178,7 @@ export function reducer(state: DemoState, action: Action): DemoState {
         signedTimestamp: action.result.signed.timestamp,
       };
       const latencies =
-        action.result.status === 202
+        action.result.status === 202 && action.result.apiStage !== 'injected'
           ? [...state.latencies, action.result.latencyMs]
           : state.latencies;
       const counters =

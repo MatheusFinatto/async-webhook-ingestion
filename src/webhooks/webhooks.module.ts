@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { seconds, ThrottlerModule } from '@nestjs/throttler';
 import { MessagingModule } from '../messaging/messaging.module';
+import { DemoPoisonController } from './demo-poison.controller';
 import { EventPublisher } from './event-publisher';
 import { RabbitEventPublisher } from './rabbit-event-publisher';
 import { WebhookSignatureGuard } from './webhook-signature.guard';
@@ -27,7 +28,7 @@ import { WebhooksController } from './webhooks.controller';
       inject: [ConfigService],
     }),
   ],
-  controllers: [WebhooksController],
+  controllers: [WebhooksController, DemoPoisonController],
   providers: [
     WebhookSignatureGuard,
     { provide: EventPublisher, useClass: RabbitEventPublisher },
