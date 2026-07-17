@@ -24,7 +24,7 @@ async function bootstrapApi(): Promise<void> {
   if (isDemoMode()) {
     app.enableCors({
       origin: demoWebOrigin(),
-      methods: ['GET', 'POST', 'OPTIONS'],
+      methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
       allowedHeaders: [
         'content-type',
         'x-signature',
