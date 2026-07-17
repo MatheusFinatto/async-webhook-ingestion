@@ -38,6 +38,33 @@ describe('DemoOrderHandler', () => {
     ).rejects.toBeInstanceOf(PermanentProcessingError);
   });
 
+  it('always throws a transient error for the exhaust scenario without a window', async () => {
+    await expect(
+      handler.handle(event({ __scenario: 'exhaust' }), 1),
+    ).rejects.toBeInstanceOf(TransientProcessingError);
+    await expect(
+      handler.handle(event({ __scenario: 'exhaust' }), 9),
+    ).rejects.toBeInstanceOf(TransientProcessingError);
+  });
+
+  it('fails the exhaust scenario while the outage window is open', async () => {
+    await expect(
+      handler.handle(
+        event({ __scenario: 'exhaust', __outage_until: Date.now() + 60_000 }),
+        1,
+      ),
+    ).rejects.toBeInstanceOf(TransientProcessingError);
+  });
+
+  it('succeeds the exhaust scenario after the outage window closes', async () => {
+    await expect(
+      handler.handle(
+        event({ __scenario: 'exhaust', __outage_until: Date.now() - 1_000 }),
+        1,
+      ),
+    ).resolves.toBeUndefined();
+  });
+
   it('fails the transient scenario on the first two attempts', async () => {
     await expect(
       handler.handle(event({ __scenario: 'transient' }), 1),

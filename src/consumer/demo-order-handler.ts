@@ -7,13 +7,15 @@ import {
 
 export const DEMO_SCENARIO_KEY = '__scenario';
 
+export const OUTAGE_UNTIL_KEY = '__outage_until';
+
 export const TRANSIENT_SUCCESS_ATTEMPT = 3;
 
-export type DemoScenario = 'transient' | 'permanent';
+export type DemoScenario = 'transient' | 'permanent' | 'exhaust';
 
 function scenarioOf(event: HandledEvent): DemoScenario | null {
   const value = event.payload[DEMO_SCENARIO_KEY];
-  if (value === 'transient' || value === 'permanent') {
+  if (value === 'transient' || value === 'permanent' || value === 'exhaust') {
     return value;
   }
   return null;
@@ -27,6 +29,15 @@ export class DemoOrderHandler extends OrderHandler {
       throw new PermanentProcessingError(
         `demo scenario "permanent" for ${event.eventId}`,
       );
+    }
+    if (scenario === 'exhaust') {
+      const outageUntil = Number(event.payload[OUTAGE_UNTIL_KEY]);
+      if (!Number.isFinite(outageUntil) || Date.now() < outageUntil) {
+        throw new TransientProcessingError(
+          `demo scenario "exhaust" failing attempt ${attempt} for ${event.eventId}`,
+        );
+      }
+      return;
     }
     if (scenario === 'transient' && attempt < TRANSIENT_SUCCESS_ATTEMPT) {
       throw new TransientProcessingError(

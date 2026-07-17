@@ -6,6 +6,7 @@ export type ScenarioId =
   | 'stale_timestamp'
   | 'duplicate'
   | 'transient'
+  | 'exhaust'
   | 'permanent'
   | 'malformed';
 
@@ -37,6 +38,8 @@ export interface ScenarioDef {
 }
 
 const EVENT_TYPE = 'order.created';
+
+export const OUTAGE_WINDOW_MS = 240_000;
 
 function orderBody(
   eventId: string,
@@ -179,6 +182,33 @@ export const SCENARIOS: ScenarioDef[] = [
           eventType: EVENT_TYPE,
           body: orderBody(eventId, { __scenario: 'transient' }),
           label: 'Transient failure',
+        },
+      ];
+    },
+  },
+  {
+    id: 'exhaust',
+    label: 'Retries exhausted',
+    description: 'Fails every attempt → full ladder 5s→30s→2min → DLQ',
+    story: [
+      { tone: 'fail', text: 'A dependency goes down for 4 minutes straight' },
+      { tone: 'retry', text: 'Retries at 5s, 30s and 2min, every attempt fails' },
+      { tone: 'fail', text: 'Attempt 4 was the last one, off to the dead-letter queue' },
+      { tone: 'ok', text: 'Replay from the DLQ succeeds once the 4min outage ends' },
+    ],
+    expected: '202',
+    build: () => {
+      const eventId = newEventId();
+      return [
+        {
+          correlationId: newCorrelationId(),
+          eventId,
+          eventType: EVENT_TYPE,
+          body: orderBody(eventId, {
+            __scenario: 'exhaust',
+            __outage_until: Date.now() + OUTAGE_WINDOW_MS,
+          }),
+          label: 'Retries exhausted',
         },
       ];
     },
