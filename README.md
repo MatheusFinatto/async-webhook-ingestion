@@ -7,7 +7,7 @@ never blocks a partner's request.
 
 The design decisions behind this project (why RabbitMQ over BullMQ, why PostgreSQL as
 the idempotency store, the publish-and-confirm trade-off, and so on) are explained in
-detail on [my portfolio](https://matheusfinatto.vercel.app).
+detail on [my portfolio](https://matheusfinatto-portfolio.vercel.app).
 
 ## What it does
 
@@ -202,4 +202,4 @@ WEBHOOK_HMAC_SECRET="your-secret" RATE_LIMIT_MAX=10000 node bench/latency-smoke.
 
 The reasoning behind the stack and the reliability semantics (broker choice, idempotency
 store, publish-and-confirm versus latency, retry topology) is written up in depth on
-[my portfolio](https://matheusfinatto.vercel.app).
+[my portfolio](https://matheusfinatto-portfolio.vercel.app).
